@@ -616,14 +616,17 @@ static void graph_floyd(const track_t *t, uint16_t c)
                     int32_t sus_offset = clamp((int32_t)v->age * 2, 0, sus_width > 0 ? sus_width : 0);
                     tx = env[trace_op].x[2] + sus_offset;
                 }
-            } else if (stage == 3) { /* Release: from x[3] to x[4] */
-                if (sus_val > 4096) {
-                    int32_t r_prog = (sus_val - env_val) * 4096 / sus_val;
-                    r_prog = clamp(r_prog, 0, 4096);
-                    tx = env[trace_op].x[3] + (env[trace_op].x[4] - env[trace_op].x[3]) * r_prog / 4096;
-                } else {
-                    tx = env[trace_op].x[4];
-                }
+            } else if (stage == 3) { /* Release: smooth decay down to baseline from sustain position */
+                int32_t sus_width = env[trace_op].x[3] - env[trace_op].x[2];
+                int32_t sus_offset = clamp((int32_t)v->age * 2, 0, sus_width > 0 ? sus_width : 0);
+                int32_t x_rel_start = env[trace_op].x[2] + sus_offset;
+                int32_t r_width = env[trace_op].x[4] - env[trace_op].x[3];
+                if (r_width < 10) r_width = 10;
+
+                int32_t r_denom = sus_val > 4096 ? sus_val : (1 << 20);
+                int32_t r_prog = ((r_denom - env_val) * 4096) / r_denom;
+                r_prog = clamp(r_prog, 0, 4096);
+                tx = x_rel_start + r_width * r_prog / 4096;
             }
 
             tx = clamp(tx, x0, x0 + w);
