@@ -383,6 +383,248 @@ static void graph_digital_timbre(const track_t *t, uint16_t c)
     graph_digital_floyd_ui(t, c, 1);
 }
 
+/* Floyd Steinberg Visual FM Synthesizer with 12-Step Spectral Gradient */
+static void graph_floyd(const track_t *t, uint16_t c)
+{
+    (void)c;
+    uint32_t alg = (uint32_t)t->p[P_E0] & 3u;
+    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 3u] : 0u;
+    int32_t depth = t->p[P_E4];          /* 0..127 */
+    int32_t dsus = t->p[P_E5];           /* 0..127 Option B Macro */
+    int32_t fdbk = t->p[P_E6];           /* 0..127 */
+    int32_t op_mode = t->p[P_E7] % 5;    /* 0: OP1, 1: OP2, 2: OP3, 3: OP4, 4: ALGO */
+
+    int32_t atk = t->p[P_ATK], dec = t->p[P_DEC], sus = t->p[P_SUS], rel = t->p[P_REL];
+    char hdr[48];
+
+    /* 1. Header Bar: [ALG: X NAME] CARRIER: OP1 | EDIT: OPX | RATIO: X.X | DEPTH: XX% */
+    static const char *const ALG_ROUTING[4] = {
+        "[ALG 1: (4+3+2)>1]",
+        "[ALG 2: 2>1, 4>3]",
+        "[ALG 3: 4>3>2>1]",
+        "[ALG 4: 1+2+3+4]"
+    };
+    str_cpy(hdr, ALG_ROUTING[alg], sizeof hdr);
+    cv_text(4, 0, &FONT_S, hdr, hot == P_E0 ? C_WHITE : C_HI);
+
+    /* Header Right: Editing mode and Ratio/Depth readout */
+    char edit_info[32];
+    if (op_mode == 0) {
+        str_cpy(edit_info, "OP1 (CAR) R:x1.0", sizeof edit_info);
+    } else if (op_mode == 4) {
+        str_cpy(edit_info, "ALGO/GLOBAL", sizeof edit_info);
+    } else {
+        const char *r_str = N_FLOYD_RATIO[t->p[P_E0 + op_mode] % 15];
+        str_cpy(edit_info, "OP", sizeof edit_info);
+        edit_info[2] = (char)('1' + op_mode);
+        edit_info[3] = (op_mode == 3 && fdbk > 0) ? 'F' : 'M';
+        edit_info[4] = ' ';
+        edit_info[5] = 'R';
+        edit_info[6] = ':';
+        edit_info[7] = 'x';
+        edit_info[8] = 0;
+        str_cpy(edit_info + 8, r_str, (unsigned)(sizeof(edit_info) - 8u));
+    }
+    cv_text(136, 0, &FONT_S, edit_info, (hot >= P_E1 && hot <= P_E3) || hot == P_E7 ? C_WHITE : C_AMB);
+
+    /* Separator line below header */
+    cv_line(0, 13, 239, 13, TE_G2);
+
+    /* 2. Canvas Geometry */
+    int32_t x0 = 8, w = 224;
+    int32_t bot_y = 92, top_y = 22, h = bot_y - top_y;
+
+    /* Base line */
+    cv_line(x0, bot_y + 1, x0 + w, bot_y + 1, TE_G2);
+
+    /* Carrier Envelope Timing */
+    int32_t c_a = clamp(atk * 40 / 127, 2, 40);
+    int32_t c_d = clamp(dec * 60 / 127, 2, 60);
+    int32_t c_r = clamp(rel * 50 / 127, 2, 50);
+    int32_t c_sus_len = w - c_a - c_d - c_r;
+    if (c_sus_len < 10) {
+        c_sus_len = 10;
+        int32_t tot = c_a + c_d + c_r;
+        int32_t avail = w - c_sus_len;
+        if (tot > 0) {
+            c_a = c_a * avail / tot;
+            c_d = c_d * avail / tot;
+            c_r = avail - c_a - c_d;
+        }
+    }
+    int32_t c_s_lvl = sus * h / 127;
+    int32_t c_peak_y = top_y;
+    int32_t c_sus_y = bot_y - c_s_lvl;
+
+    /* Modulator Envelope Timing (Option B) */
+    int32_t m_d = (dsus <= 63) ? clamp(dsus * 60 / 63, 2, 60) : 60;
+    int32_t m_s_lvl = (dsus <= 63) ? 0 : ((dsus - 63) * h / 64);
+    int32_t m_sus_len = w - c_a - m_d - c_r;
+    if (m_sus_len < 10) m_sus_len = 10;
+
+    /* 3. Render Ghost Overlays for Inactive Modulators */
+    if (alg != 3) { /* Algorithm 4 has 4 carriers, no modulators */
+        static const uint16_t GHOST_COLS[3] = {GHOST_OP2, GHOST_OP3, GHOST_OP4};
+        for (uint32_t m_idx = 0; m_idx < 3u; m_idx++) {
+            uint32_t op_num = m_idx + 2u;
+            /* In Algo 1 (Dual Carrier), OP3 is carrier, so only OP2 and OP4 are modulators */
+            if (alg == 1 && op_num == 3u) continue;
+
+            uint16_t g_col = GHOST_COLS[m_idx];
+            int32_t r_offset = (int32_t)m_idx * 4;
+            int32_t g_d = clamp(m_d + r_offset, 2, 80);
+            int32_t g_s_lvl = clamp(m_s_lvl * (int32_t)(depth + 30) / 157, 0, h);
+            int32_t g_peak = clamp((depth * h / 127) - (int32_t)m_idx * 3, 4, h);
+            int32_t g_sus_len = w - c_a - g_d - c_r;
+            if (g_sus_len < 10) g_sus_len = 10;
+
+            int32_t g_px = x0, g_py = bot_y;
+            /* Attack */
+            for (int32_t i = 1; i <= c_a; i++) {
+                int32_t cur_x = x0 + i;
+                int32_t cur_y = bot_y - (g_peak * i) / (c_a ? c_a : 1);
+                if ((cur_x % 3) != 0) cv_line(g_px, g_py, cur_x, cur_y, g_col);
+                g_px = cur_x; g_py = cur_y;
+            }
+            /* Decay */
+            for (int32_t i = 1; i <= g_d; i++) {
+                int32_t cur_x = x0 + c_a + i;
+                int32_t cur_y = bot_y - (g_s_lvl + ((g_peak - g_s_lvl) * (g_d - i)) / (g_d ? g_d : 1));
+                if ((cur_x % 3) != 0) cv_line(g_px, g_py, cur_x, cur_y, g_col);
+                g_px = cur_x; g_py = cur_y;
+            }
+            /* Sustain */
+            int32_t g_sus_end = x0 + c_a + g_d + g_sus_len;
+            if (g_sus_end > x0 + w - c_r) g_sus_end = x0 + w - c_r;
+            for (int32_t cur_x = g_px + 1; cur_x <= g_sus_end; cur_x++) {
+                int32_t cur_y = bot_y - g_s_lvl;
+                if ((cur_x % 3) != 0) cv_line(g_px, g_py, cur_x, cur_y, g_col);
+                g_px = cur_x; g_py = cur_y;
+            }
+            /* Release */
+            for (int32_t i = 1; i <= c_r; i++) {
+                int32_t cur_x = g_sus_end + i;
+                int32_t cur_y = bot_y - (g_s_lvl * (c_r - i)) / (c_r ? c_r : 1);
+                if ((cur_x % 3) != 0) cv_line(g_px, g_py, cur_x, cur_y, g_col);
+                g_px = cur_x; g_py = cur_y;
+            }
+        }
+    }
+
+    /* 4. Render Foreground Carrier Curve with 12-Step Spectral Gradient */
+    {
+        int32_t prev_x = x0, prev_y = bot_y;
+        int32_t sus_end = x0 + c_a + c_d + c_sus_len;
+        if (sus_end > x0 + w - c_r) sus_end = x0 + w - c_r;
+
+        for (int32_t px = x0; px <= x0 + w; px++) {
+            int32_t py = bot_y;
+            int32_t mod_lvl = 0; /* 0..1000 */
+
+            if (px <= x0 + c_a) {
+                /* Attack */
+                int32_t prog = px - x0;
+                py = bot_y - (h * prog) / (c_a ? c_a : 1);
+                mod_lvl = (1000 * prog) / (c_a ? c_a : 1);
+            } else if (px <= x0 + c_a + c_d) {
+                /* Decay */
+                int32_t prog = px - (x0 + c_a);
+                py = bot_y - (c_s_lvl + ((h - c_s_lvl) * (c_d - prog)) / (c_d ? c_d : 1));
+                if (dsus <= 63) {
+                    mod_lvl = (1000 * (c_d - prog)) / (c_d ? c_d : 1);
+                } else {
+                    int32_t sus_m = (dsus - 63) * 1000 / 64;
+                    mod_lvl = sus_m + ((1000 - sus_m) * (c_d - prog)) / (c_d ? c_d : 1);
+                }
+            } else if (px <= sus_end) {
+                /* Sustain */
+                py = c_sus_y;
+                mod_lvl = (dsus <= 63) ? 0 : ((dsus - 63) * 1000 / 64);
+            } else {
+                /* Release */
+                int32_t prog = px - sus_end;
+                py = bot_y - (c_s_lvl * (c_r - prog)) / (c_r ? c_r : 1);
+                int32_t sus_m = (dsus <= 63) ? 0 : ((dsus - 63) * 1000 / 64);
+                mod_lvl = (sus_m * (c_r - prog)) / (c_r ? c_r : 1);
+            }
+
+            /* Calculate Instantaneous Modulation Index */
+            int32_t inst_idx = 0;
+            if (alg == 3) {
+                inst_idx = 0; /* Pure Sine Organ */
+            } else if (alg == 2) {
+                /* Cascaded non-linear intensity */
+                inst_idx = (depth * mod_lvl) / 1000;
+                inst_idx = (inst_idx * 13) / 10;
+            } else {
+                inst_idx = (depth * mod_lvl) / 1000;
+            }
+            inst_idx = clamp(inst_idx, 0, 127);
+
+            /* Look up color in 12-Step Spectral Gradient */
+            uint32_t lut_idx = (uint32_t)(inst_idx * 11 / 127);
+            if (lut_idx > 11u) lut_idx = 11u;
+            uint16_t s_col = SPECTRAL_LUT_RGB565[lut_idx];
+
+            /* Soft vertical fill below curve */
+            if (py < bot_y) {
+                uint16_t fill_col = rgb_blend(s_col, C_BLACK, 190);
+                cv_line(px, py + 1, px, bot_y, fill_col);
+            }
+
+            /* 2-px Thick Polyline */
+            cv_line(prev_x, prev_y, px, py, s_col);
+            cv_pset(px, py - 1, s_col);
+            cv_pset(px, py + 1, s_col);
+
+            prev_x = px;
+            prev_y = py;
+        }
+    }
+
+    /* 5. Interactive Halo Cursor at Active Node */
+    {
+        int32_t halo_x = x0, halo_y = bot_y;
+        int32_t sus_end = x0 + c_a + c_d + c_sus_len;
+        if (hot == P_ATK) {
+            halo_x = x0 + c_a;
+            halo_y = c_peak_y;
+        } else if (hot == P_DEC || hot == P_E5) {
+            halo_x = x0 + c_a + c_d;
+            halo_y = c_sus_y;
+        } else if (hot == P_SUS) {
+            halo_x = (x0 + c_a + c_d + sus_end) / 2;
+            halo_y = c_sus_y;
+        } else if (hot == P_REL) {
+            halo_x = x0 + w;
+            halo_y = bot_y;
+        } else if (hot == P_E4) {
+            /* Mod Depth node at attack peak */
+            halo_x = x0 + c_a;
+            halo_y = bot_y - (depth * h / 127);
+        }
+
+        if (hot == P_ATK || hot == P_DEC || hot == P_SUS || hot == P_REL || hot == P_E4 || hot == P_E5) {
+            cv_rect(halo_x - 3, halo_y - 3, 7, 1, C_WHITE);
+            cv_rect(halo_x - 3, halo_y + 3, 7, 1, C_WHITE);
+            cv_rect(halo_x - 3, halo_y - 2, 1, 5, C_WHITE);
+            cv_rect(halo_x + 3, halo_y - 2, 1, 5, C_WHITE);
+        }
+    }
+
+    /* 6. Live Real-time Note Tracer */
+    for (uint32_t i = 0; i < NVOICE; i++) {
+        const voice_t *v = &t->v[i];
+        if (v->active && v->gate && v->stage <= 2) {
+            int32_t tx = x0 + c_a;
+            int32_t ty = bot_y - (v->env >> 14) * h / 1000;
+            ty = clamp(ty, top_y, bot_y);
+            cv_rect(tx - 2, ty - 2, 5, 5, C_WHITE);
+            cv_rect(tx - 1, ty - 1, 3, 3, RGB(255, 200, 40));
+        }
+    }
+}
+
 static void graph_lfo(const track_t *t, uint16_t c)
 {
     int32_t x, py = 50;
@@ -554,7 +796,7 @@ static uint32_t graph_signature(void)
             ph = 0xFFFFu;                            /* the roll shows the cursor's bank only */
         h ^= steps_hash(t) + ph * 31u + ui.cursor * 7919u;
     }
-    if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL) {
+    if (pg->scope == SC_ENGINE && (ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL || ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD)) {
         uint32_t v_active = 0;
         for (i = 0; i < NVOICE; i++)
             if (t->v[i].active && t->v[i].gate)
@@ -842,6 +1084,8 @@ static void draw_graph(void)
             graph_digital_alg(t, c);
         else if (pg->id[0] == P_E4)
             graph_digital_timbre(t, c);
+    } else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD) {
+        graph_floyd(t, c);
     } else {
         switch (pg->graph) {
         case GR_ADSR:

@@ -43,6 +43,26 @@ static uint16_t pal[5];
 #define C_AMB pal[3]                 /* 4 secondary text */
 #define C_HI pal[4]                  /* 5 values, curves */
 
+/* 12-Step Spectral Gradient Palette for FLOYD FM Visualizer */
+static const uint16_t SPECTRAL_LUT_RGB565[12] = {
+    0x1A0D, /* Step 0:  Deep Navy Blue (Pure fundamental sinus) */
+    0x1128, /* Step 1:  Midnight Blue */
+    0x18CA, /* Step 2:  Deep Indigo */
+    0x51B0, /* Step 3:  Rich Violet */
+    0x7914, /* Step 4:  Purple-Magenta */
+    0xA08D, /* Step 5:  Magenta */
+    0xC007, /* Step 6:  Deep Crimson */
+    0xE120, /* Step 7:  Orange-Red */
+    0xF2B1, /* Step 8:  Coral Pink */
+    0xFAAA, /* Step 9:  Electric Orange */
+    0xFBC8, /* Step 10: Bright Amber */
+    0xF900  /* Step 11: Fiery Red (Max FM brightness) */
+};
+
+#define GHOST_OP2 RGB(24, 60, 140)
+#define GHOST_OP3 RGB(20, 100, 40)
+#define GHOST_OP4 RGB(140, 100, 20)
+
 static void palette_set(uint32_t i)
 {
     uint32_t k;
