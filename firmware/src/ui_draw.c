@@ -590,44 +590,60 @@ static void graph_floyd(const track_t *t, uint16_t c)
     uint32_t trace_op = (active_op >= 0 && active_op < 4) ? (uint32_t)active_op : 0u;
     for (uint32_t i = 0; i < NVOICE; i++) {
         const voice_t *v = &t->v[i];
-        if (v->active && v->stage > 0 && v->stage <= 3) {
-            int32_t stage = (trace_op == 0) ? v->stage : v->s[trace_op + 2u];
-            int32_t env_val = (trace_op == 0) ? v->env : v->s[trace_op - 1u];
-            int32_t sus_val = (trace_op == 0) ? ((int32_t)t->p[P_SUS] << 17)
-                                              : ((int32_t)floyd_state[p].sus[trace_op] * ((1 << 24) / 127));
-            int32_t pk = (trace_op == 0 || (FLOYD_MOD_MASK[alg] & (1u << trace_op)) == 0) ? h : clamp(op_lvl[trace_op] * h / 127, 4, h);
+        if (!v->active) continue;
 
-            int32_t tx = env[trace_op].x[0];
-            int32_t ty = bot_y - (env_val * pk >> 24);
+        int32_t stage = (trace_op == 0) ? v->stage : v->s[trace_op + 2u];
+        int32_t env_val = (trace_op == 0) ? v->env : v->s[trace_op - 1u];
 
-            if (stage == 1) { /* Attack: from x[0] to x[1] */
-                int32_t frac = clamp(env_val >> 12, 0, 4096);
-                tx = env[trace_op].x[0] + (env[trace_op].x[1] - env[trace_op].x[0]) * frac / 4096;
-            } else if (stage == 2) { /* Decay & Sustain: from x[1] to x[2], then across sustain x[2]..x[3] */
-                int32_t d_range = (1 << 24) - sus_val;
-                if (env_val > sus_val + 8192 && d_range > 8192) {
-                    int32_t d_prog = ((1 << 24) - env_val) * 4096 / d_range;
-                    d_prog = clamp(d_prog, 0, 4096);
-                    tx = env[trace_op].x[1] + (env[trace_op].x[2] - env[trace_op].x[1]) * d_prog / 4096;
-                } else {
-                    int32_t s_range = env[trace_op].x[3] - env[trace_op].x[2];
-                    int32_t s_prog = clamp((int32_t)v->age * 3, 0, s_range > 0 ? s_range : 0);
-                    tx = env[trace_op].x[2] + s_prog;
-                }
-            } else if (stage == 3) { /* Release: from x[3] to x[4] */
-                int32_t r_prog = 4096;
-                if (sus_val > 4096) {
-                    r_prog = clamp(((sus_val - env_val) * 4096) / sus_val, 0, 4096);
-                }
-                tx = env[trace_op].x[3] + (env[trace_op].x[4] - env[trace_op].x[3]) * r_prog / 4096;
+        if (stage <= 0 || stage > 3 || env_val <= 0) continue;
+
+        int32_t pk = (trace_op == 0 || (FLOYD_MOD_MASK[alg] & (1u << trace_op)) == 0) ? h : clamp(op_lvl[trace_op] * h / 127, 4, h);
+        int32_t x0_p = env[trace_op].x[0], y0_p = env[trace_op].y[0];
+        int32_t x1_p = env[trace_op].x[1], y1_p = env[trace_op].y[1];
+        int32_t x2_p = env[trace_op].x[2], y2_p = env[trace_op].y[2];
+        int32_t x3_p = env[trace_op].x[3], y3_p = env[trace_op].y[3];
+        int32_t x4_p = env[trace_op].x[4], y4_p = env[trace_op].y[4];
+
+        int32_t tx = x0_p;
+        int32_t ty_env = bot_y - (int32_t)(((int64_t)pk * env_val) >> 24);
+        int32_t ty = clamp(ty_env, y1_p, bot_y);
+
+        if (stage == 1) { /* Attack: travels diagonally on segment (x0,y0) -> (x1,y1) */
+            int32_t a_yrange = y0_p - y1_p;
+            if (a_yrange > 0) {
+                tx = x0_p + (x1_p - x0_p) * (y0_p - ty) / a_yrange;
+            } else {
+                tx = x1_p;
             }
-
-            tx = clamp(tx, x0, x0 + w);
-            ty = clamp(ty, top_y, bot_y);
-            cv_rect(tx - 3, ty - 3, 7, 7, C_WHITE);
-            cv_rect(tx - 2, ty - 2, 5, 5, OP_COLS[trace_op]);
-            cv_rect(tx - 1, ty - 1, 3, 3, RGB(255, 245, 100));
+        } else if (stage == 2) { /* Decay & Sustain */
+            int32_t d_yrange = y2_p - y1_p;
+            if (d_yrange > 0 && ty < y2_p) {
+                /* On Decay slope: travels diagonally on segment (x1,y1) -> (x2,y2) */
+                tx = x1_p + (x2_p - x1_p) * (ty - y1_p) / d_yrange;
+            } else {
+                /* On Sustain plateau: travels horizontally on segment (x2,y2) -> (x3,y3) */
+                ty = y2_p;
+                int32_t s_xrange = x3_p - x2_p;
+                int32_t s_prog = clamp((int32_t)v->age * 2, 0, s_xrange > 0 ? s_xrange : 0);
+                tx = x2_p + s_prog;
+            }
+        } else if (stage == 3) { /* Release: travels diagonally on segment (x3,y3) -> (x4,y4) */
+            int32_t r_yrange = y4_p - y3_p;
+            if (r_yrange > 0) {
+                int32_t r_ty = clamp(ty_env, y3_p, y4_p);
+                ty = r_ty;
+                tx = x3_p + (x4_p - x3_p) * (r_ty - y3_p) / r_yrange;
+            } else {
+                ty = y4_p;
+                tx = x4_p;
+            }
         }
+
+        tx = clamp(tx, x0, x0 + w);
+        ty = clamp(ty, top_y, bot_y);
+        cv_rect(tx - 3, ty - 3, 7, 7, C_WHITE);
+        cv_rect(tx - 2, ty - 2, 5, 5, OP_COLS[trace_op]);
+        cv_rect(tx - 1, ty - 1, 3, 3, RGB(255, 245, 100));
     }
 }
 

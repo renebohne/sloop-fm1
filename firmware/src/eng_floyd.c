@@ -30,8 +30,8 @@ static void floyd_note_on(track_t *t, voice_t *v)
 {
     uint32_t p = floyd_part(t);
     v->ph[0] = v->ph[1] = v->ph[2] = 0;
+    v->s[6] = 0;                 /* feedback history */
     v->s[7] = 0;                 /* op 4 phase */
-    v->s[5] = v->s[6] = 0;       /* feedback history */
 
     /* Op 2, 3, 4 envelope levels and stages */
     for (uint32_t k = 1; k < 4u; k++) {
@@ -64,7 +64,7 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     uint32_t i2 = floyd_ratio_inc(m->inc, FLOYD_RATIO_Q8[p[P_E1] % 15]);
     uint32_t i3 = floyd_ratio_inc(m->inc, FLOYD_RATIO_Q8[p[P_E2] % 15]);
     uint32_t i4 = floyd_ratio_inc(m->inc, FLOYD_RATIO_Q8[p[P_E3] % 15]);
-    int32_t fb1, fb2;
+    int32_t fb1;
     uint32_t ph0, ph1, ph2, ph4;
 
     /* Per-modulator ADSR envelope updates */
@@ -94,6 +94,10 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
             int32_t r_val = floyd_state[part].rel[k];
             uint32_t rel_coeff = ENV_EXP[r_val & 127];
             v->s[s_idx] += mulq16(0 - v->s[s_idx], rel_coeff);
+            if (v->s[s_idx] < (1 << 12)) {
+                v->s[s_idx] = 0;
+                v->s[st_idx] = 0;
+            }
         }
     }
 
@@ -115,13 +119,11 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     ph1 = v->ph[1];
     ph2 = v->ph[2];
     ph4 = (uint32_t)v->s[7];
-    fb1 = v->s[5];
-    fb2 = v->s[6];
+    fb1 = v->s[6];
 
     for (i = 0; i < n; i++) {
         int32_t o1, o2, o3, o4, s;
-        o4 = sine_i(ph4 + floyd_mod((fb1 + fb2) >> 1, fb));
-        fb2 = fb1;
+        o4 = sine_i(ph4 + floyd_mod(fb1, fb));
         fb1 = o4;
 
         switch (alg) {
@@ -188,9 +190,8 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     v->ph[0] = ph0;
     v->ph[1] = ph1;
     v->ph[2] = ph2;
+    v->s[6] = fb1;
     v->s[7] = (int32_t)ph4;
-    v->s[5] = fb1;
-    v->s[6] = fb2;
 }
 
 static const preset_t FLOYD_PRESETS[] = {
