@@ -93,7 +93,7 @@ static uint32_t page_first(uint32_t fam)
 {
     uint32_t i;
     for (i = 0; i < NPAGES; i++)
-        if (PAGES[i].fam == fam)
+        if (PAGES[i].fam == fam && page_valid_for_trk(&PAGES[i]))
             return i;
     return 0;
 }
@@ -184,12 +184,17 @@ static void open_family(uint32_t fam)
 {
     if (!ui.home && cur_page()->fam == fam) {          /* same button again: next page */
         uint32_t i = ui.page + 1u;
+        while (i < NPAGES && PAGES[i].fam == fam && !page_valid_for_trk(&PAGES[i]))
+            i++;
         if (i >= NPAGES || PAGES[i].fam != fam)
             i = page_first(fam);
         ui.page = (uint8_t)i;
     } else {
-        ui.page = ui.fam_last[fam] && PAGES[ui.fam_last[fam]].fam == fam ? ui.fam_last[fam]
-                                                                          : (uint8_t)page_first(fam);
+        uint32_t p = ui.fam_last[fam];
+        if (p < NPAGES && PAGES[p].fam == fam && page_valid_for_trk(&PAGES[p]))
+            ui.page = (uint8_t)p;
+        else
+            ui.page = (uint8_t)page_first(fam);
     }
     ui.fam_last[fam] = ui.page;
     ui.home = 0;

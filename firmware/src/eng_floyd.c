@@ -1,24 +1,50 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* FLOYD: 4-operator FM synthesizer with visual spectral gradient and Option B Decay/Sustain macro. */
-/* Four sine operators, 4 Floyd Steinberg algorithms (ALG = P_E0),
- * op 4 with feedback, Option B Decay/Sustain combined macro (DSUS = P_E5).
- * Phase modulation wraps naturally in the 32-bit phase. */
+/* FLOYD: 4-operator FM synthesizer with 8 algorithms, per-operator ADSR, and vector rendering. */
 
 static const char *const N_FLOYD_ALG[] = {"STACK", "(3+4)>2>1", "(2+4)>1", "(2+3)>1", "DUAL", "3-TO-1", "4>3, 1, 2", "ORGAN"};
 static const char *const N_FLOYD_RATIO[] = {".5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "14", "16"};
 static const uint16_t FLOYD_RATIO_Q8[15] = {128, 256, 512, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2560, 2816,
                                             3072, 3584, 4096};
-static const char *const N_FLOYD_OP[] = {"OP1", "OP2", "OP3", "OP4", "ALGO"};
+
+typedef struct {
+    int16_t atk[4];   /* 0..127 */
+    int16_t dec[4];   /* 0..127 */
+    int16_t sus[4];   /* 0..127 */
+    int16_t rel[4];   /* 0..127 */
+    int16_t lvl[4];   /* 0..127 */
+} floyd_trk_state_t;
+
+static floyd_trk_state_t floyd_state[NPART] = {
+    {{0, 5, 10, 15}, {70, 60, 70, 80}, {90, 0, 0, 0}, {60, 40, 40, 40}, {127, 64, 40, 32}},
+    {{0, 5, 10, 15}, {70, 60, 70, 80}, {90, 0, 0, 0}, {60, 40, 40, 40}, {127, 64, 40, 32}},
+    {{0, 5, 10, 15}, {70, 60, 70, 80}, {90, 0, 0, 0}, {60, 40, 40, 40}, {127, 64, 40, 32}},
+};
+
+static inline uint32_t floyd_part(const track_t *t)
+{
+    return (uint32_t)(t - trk) % NPART;
+}
 
 static void floyd_note_on(track_t *t, voice_t *v)
 {
-    (void)t;
+    uint32_t p = floyd_part(t);
     v->ph[0] = v->ph[1] = v->ph[2] = 0;
     v->s[7] = 0;                 /* op 4 phase */
-    v->s[4] = 1 << 24;           /* op 2 envelope, Q24 */
-    v->s[3] = 1 << 24;           /* op 3 envelope, Q24 */
     v->s[5] = v->s[6] = 0;       /* feedback history */
+
+    /* Op 2, 3, 4 envelope levels and stages */
+    for (uint32_t k = 1; k < 4u; k++) {
+        uint32_t s_idx = k - 1u;  /* s[0], s[1], s[2] for OP2, OP3, OP4 */
+        uint32_t st_idx = k + 2u; /* s[3], s[4], s[5] for stages */
+        if (floyd_state[p].atk[k] <= 2) {
+            v->s[s_idx] = 1 << 24;
+            v->s[st_idx] = 2;    /* decay stage */
+        } else {
+            v->s[s_idx] = 0;
+            v->s[st_idx] = 1;    /* attack stage */
+        }
+    }
 }
 
 static inline uint32_t floyd_ratio_inc(uint32_t inc, uint32_t r)
@@ -32,6 +58,7 @@ static inline uint32_t floyd_mod(int32_t x, int32_t idx) { return (uint32_t)(x *
 static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
+    uint32_t part = floyd_part(t);
     uint32_t alg = (uint32_t)p[P_E0] & 7u, i;
     uint32_t i1 = m->inc;
     uint32_t i2 = floyd_ratio_inc(m->inc, FLOYD_RATIO_Q8[p[P_E1] % 15]);
@@ -40,31 +67,49 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
     int32_t fb1, fb2;
     uint32_t ph0, ph1, ph2, ph4;
 
-    /* OP2 Envelope & Depth */
-    int32_t dec2 = p[P_E5] & 127;
-    if (dec2 <= 63) {
-        uint32_t decay_coeff = ENV_EXP[(dec2 * 2) & 127];
-        v->s[4] += mulq16(0 - v->s[4], decay_coeff);
-    } else {
-        int32_t target_sustain = (dec2 - 63) * ((1 << 24) / 64);
-        uint32_t decay_coeff = ENV_EXP[127];
-        v->s[4] += mulq16(target_sustain - v->s[4], decay_coeff);
+    /* Per-modulator ADSR envelope updates */
+    for (uint32_t k = 1; k < 4u; k++) {
+        uint32_t s_idx = k - 1u;
+        uint32_t st_idx = k + 2u;
+        int32_t stage = v->s[st_idx];
+        if (!v->gate && stage > 0 && stage < 3) {
+            stage = 3; /* Release */
+            v->s[st_idx] = 3;
+        }
+
+        if (stage == 1) { /* Attack */
+            int32_t a_val = floyd_state[part].atk[k];
+            uint32_t step = (uint32_t)(ENV_EXP[(127 - a_val) & 127] << 8) + 4096u;
+            v->s[s_idx] += (int32_t)step;
+            if (v->s[s_idx] >= (1 << 24)) {
+                v->s[s_idx] = 1 << 24;
+                v->s[st_idx] = 2; /* Switch to Decay */
+            }
+        } else if (stage == 2) { /* Decay / Sustain */
+            int32_t d_val = floyd_state[part].dec[k];
+            int32_t s_target = floyd_state[part].sus[k] * ((1 << 24) / 127);
+            uint32_t decay_coeff = ENV_EXP[d_val & 127];
+            v->s[s_idx] += mulq16(s_target - v->s[s_idx], decay_coeff);
+        } else if (stage == 3) { /* Release */
+            int32_t r_val = floyd_state[part].rel[k];
+            uint32_t rel_coeff = ENV_EXP[r_val & 127];
+            v->s[s_idx] += mulq16(0 - v->s[s_idx], rel_coeff);
+        }
     }
-    int32_t me2 = v->s[4] >> 9;                                         /* Q15 */
+
+    int32_t me2 = v->s[0] >> 9;                                         /* Q15 */
     int32_t idx2 = (p[P_E4] * me2) >> 15;                               /* 0..127 */
     idx2 = clamp(idx2 + ((m->cutoff + m->shape - (64 << 8)) >> 8) + (v->vel - 96) / 4, 0, 127);
 
-    /* OP3 Envelope & Depth */
-    uint32_t decay3_coeff = (dec2 <= 63) ? ENV_EXP[clamp(dec2 * 2 + 8, 0, 127)] : ENV_EXP[127];
-    int32_t target_sus3 = (dec2 <= 63) ? 0 : (dec2 - 63) * ((1 << 24) / 64);
-    v->s[3] += mulq16(target_sus3 - v->s[3], decay3_coeff);
-    int32_t me3 = v->s[3] >> 9;                                         /* Q15 */
+    int32_t me3 = v->s[1] >> 9;                                         /* Q15 */
     int32_t idx3 = (p[P_E6] * me3) >> 15;                               /* 0..127 */
     idx3 = clamp(idx3 + ((m->cutoff + m->shape - (64 << 8)) >> 8) + (v->vel - 96) / 4, 0, 127);
 
-    /* OP4 Feedback & Modulation */
+    int32_t me4 = v->s[2] >> 9;                                         /* Q15 */
+    int32_t idx4 = (floyd_state[part].lvl[3] * me4) >> 15;              /* 0..127 */
+    idx4 = clamp(idx4 + (v->vel - 96) / 4, 0, 127);
+
     int32_t fb = p[P_E7] & 127;
-    int32_t idx4 = clamp(fb + (v->vel - 96) / 4, 0, 127);
 
     ph0 = v->ph[0];
     ph1 = v->ph[1];

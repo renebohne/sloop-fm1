@@ -397,14 +397,11 @@ static void graph_digital_timbre(const track_t *t, uint16_t c)
 static void graph_floyd(const track_t *t, uint16_t c)
 {
     (void)c;
+    uint32_t p = floyd_part(t);
     uint32_t alg = (uint32_t)t->p[P_E0] & 7u;
     uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 3u] : 0u;
-    int32_t lvl2 = t->p[P_E4];          /* 0..127 */
-    int32_t dec2 = t->p[P_E5];          /* 0..127 Option B Macro */
-    int32_t lvl3 = t->p[P_E6];          /* 0..127 */
-    int32_t fdbk = t->p[P_E7];          /* 0..127 */
+    const page_t *pg = cur_page();
 
-    int32_t atk = t->p[P_ATK], dec = t->p[P_DEC], sus = t->p[P_SUS], rel = t->p[P_REL];
     static const uint8_t FLOYD_MOD_MASK[8] = { 0x0E, 0x0E, 0x0E, 0x0E, 0x0A, 0x0E, 0x08, 0x00 };
     static const uint16_t OP_COLS[4] = { FLOYD_OP1_COL, FLOYD_OP2_COL, FLOYD_OP3_COL, FLOYD_OP4_COL };
 
@@ -419,19 +416,42 @@ static void graph_floyd(const track_t *t, uint16_t c)
         "ALG 7: 4>3, 1, 2",
         "ALG 8: 1+2+3+4"
     };
-    cv_text(4, 0, &FONT_S, ALG_ROUTING[alg], hot == P_E0 ? C_WHITE : C_HI);
+
+    if (pg->scope == SC_FLOYD && pg->title[0] == 'O' && pg->title[1] == 'P') {
+        static const char *const OP_TITLES[4] = {
+            "OP1: CARRIER (CYAN)",
+            "OP2: MODULATOR (AMBER)",
+            "OP3: MODULATOR (EMERALD)",
+            "OP4: MODULATOR (MAGENTA)"
+        };
+        uint32_t op_idx = (uint32_t)(pg->title[2] - '1');
+        cv_text(4, 0, &FONT_S, OP_TITLES[op_idx & 3u], C_WHITE);
+    } else if (pg->scope == SC_FLOYD && pg->title[0] == 'L') {
+        cv_text(4, 0, &FONT_S, "LEVEL: OP1..OP4 DEPTHS", C_WHITE);
+    } else if (pg->scope == SC_FLOYD && pg->title[0] == 'R') {
+        cv_text(4, 0, &FONT_S, "RATIO: FDBK & RATIOS", C_WHITE);
+    } else {
+        cv_text(4, 0, &FONT_S, ALG_ROUTING[alg], hot == P_E0 ? C_WHITE : C_HI);
+    }
 
     /* Determine Active Operator */
     int32_t active_op = -1;
-    if (ui.hot_t) {
-        if (hot == P_E1 || hot == P_E4 || hot == P_E5) active_op = 1;      /* OP2 */
-        else if (hot == P_E2 || hot == P_E6) active_op = 2;                /* OP3 */
-        else if (hot == P_E3 || hot == P_E7) active_op = 3;                /* OP4 */
-        else if (hot == P_ATK || hot == P_DEC || hot == P_SUS || hot == P_REL) active_op = 0; /* OP1 */
-    } else {
-        const page_t *pg = cur_page();
-        if (pg->id[0] == P_E4) active_op = 1;
-        else if (pg->id[0] == P_ATK) active_op = 0;
+    if (pg->scope == SC_FLOYD) {
+        if (pg->title[0] == 'O' && pg->title[1] == 'P') {
+            active_op = (int32_t)(pg->title[2] - '1');
+        } else if (pg->title[0] == 'L') { /* LEVEL page */
+            active_op = ui.hot_t ? (int32_t)(ui.hot_col & 3u) : -1;
+        } else if (pg->title[0] == 'R') { /* RATIO page */
+            if (ui.hot_t) {
+                uint32_t hcol = ui.hot_col & 3u;
+                active_op = (hcol == 0) ? 3 : (int32_t)hcol;
+            }
+        }
+    } else if (ui.hot_t) {
+        if (hot == P_E1 || hot == P_E4) active_op = 1;
+        else if (hot == P_E2 || hot == P_E6) active_op = 2;
+        else if (hot == P_E3 || hot == P_E7) active_op = 3;
+        else if (hot == P_ATK || hot == P_DEC || hot == P_SUS || hot == P_REL) active_op = 0;
     }
 
     /* Top Operator Badges: OP1 OP2 OP3 OP4 */
@@ -454,24 +474,11 @@ static void graph_floyd(const track_t *t, uint16_t c)
     /* Base line */
     cv_line(x0, bot_y + 1, x0 + w, bot_y + 1, TE_G2);
 
-    /* OP1 (Carrier) Envelope */
-    int32_t c_a = clamp(atk * 40 / 127, 2, 40);
-    int32_t c_d = clamp(dec * 60 / 127, 2, 60);
-    int32_t c_r = clamp(rel * 50 / 127, 2, 50);
-    int32_t c_s_lvl = sus * h / 127;
-
-    /* Modulator Envelopes */
-    int32_t m2_d = (dec2 <= 63) ? clamp(dec2 * 55 / 63, 2, 55) : 55;
-    int32_t m2_s = (dec2 <= 63) ? 0 : ((dec2 - 63) * h / 64);
-    int32_t m2_peak = clamp(lvl2 * h / 127, 4, h);
-
-    int32_t m3_d = clamp(m2_d + 6, 2, 65);
-    int32_t m3_s = clamp(m2_s * 8 / 10, 0, h);
-    int32_t m3_peak = clamp(lvl3 * h / 127, 4, h);
-
-    int32_t m4_d = clamp(m2_d + 12, 2, 75);
-    int32_t m4_s = clamp(m2_s * 7 / 10, 0, h);
-    int32_t m4_peak = clamp(fdbk * h / 127, 4, h);
+    int32_t op_atk[4] = { t->p[P_ATK], floyd_state[p].atk[1], floyd_state[p].atk[2], floyd_state[p].atk[3] };
+    int32_t op_dec[4] = { t->p[P_DEC], floyd_state[p].dec[1], floyd_state[p].dec[2], floyd_state[p].dec[3] };
+    int32_t op_sus[4] = { t->p[P_SUS], floyd_state[p].sus[1], floyd_state[p].sus[2], floyd_state[p].sus[3] };
+    int32_t op_rel[4] = { t->p[P_REL], floyd_state[p].rel[1], floyd_state[p].rel[2], floyd_state[p].rel[3] };
+    int32_t op_lvl[4] = { floyd_state[p].lvl[0], t->p[P_E4], t->p[P_E6], (floyd_state[p].lvl[3] + t->p[P_E7]) / 2 };
 
     /* 3. Compute Envelopes for all 4 Operators */
     struct {
@@ -485,28 +492,11 @@ static void graph_floyd(const track_t *t, uint16_t c)
         env[k].is_carrier = is_car;
         env[k].connected = 1;
 
-        int32_t a, d, s_lvl, r, pk;
-        if (k == 0) {
-            a = c_a; d = c_d; s_lvl = c_s_lvl; r = c_r; pk = h;
-        } else if (k == 1) {
-            a = is_car ? c_a : clamp(c_a / 2 + 2, 2, 25);
-            d = is_car ? clamp(c_d - 4, 2, 60) : m2_d;
-            s_lvl = is_car ? c_s_lvl : m2_s;
-            r = is_car ? c_r : clamp(c_r + 3, 2, 50);
-            pk = is_car ? h : m2_peak;
-        } else if (k == 2) {
-            a = is_car ? c_a : clamp(c_a / 2 + 4, 2, 30);
-            d = is_car ? clamp(c_d - 8, 2, 60) : m3_d;
-            s_lvl = is_car ? c_s_lvl : m3_s;
-            r = is_car ? c_r : clamp(c_r + 6, 2, 50);
-            pk = is_car ? h : m3_peak;
-        } else {
-            a = is_car ? c_a : clamp(c_a / 2 + 1, 2, 20);
-            d = is_car ? clamp(c_d - 12, 2, 60) : m4_d;
-            s_lvl = is_car ? c_s_lvl : m4_s;
-            r = is_car ? c_r : clamp(c_r + 9, 2, 50);
-            pk = is_car ? h : m4_peak;
-        }
+        int32_t a = clamp(op_atk[k] * 40 / 127, 2, 40);
+        int32_t d = clamp(op_dec[k] * 55 / 127, 2, 55);
+        int32_t s_lvl = clamp(op_sus[k] * h / 127, 0, h);
+        int32_t r = clamp(op_rel[k] * 50 / 127, 2, 50);
+        int32_t pk = is_car ? h : clamp(op_lvl[k] * h / 127, 4, h);
 
         int32_t sus_len = w - a - d - r;
         if (sus_len < 10) sus_len = 10;
@@ -515,22 +505,22 @@ static void graph_floyd(const track_t *t, uint16_t c)
 
         env[k].x[0] = x0;               env[k].y[0] = bot_y;
         env[k].x[1] = x0 + a;           env[k].y[1] = bot_y - pk;
-        env[k].x[2] = x0 + a + d;       env[k].y[2] = bot_y - s_lvl;
-        env[k].x[3] = sus_end;          env[k].y[3] = bot_y - s_lvl;
+        env[k].x[2] = x0 + a + d;       env[k].y[2] = bot_y - s_lvl * pk / (h ? h : 1);
+        env[k].x[3] = sus_end;          env[k].y[3] = bot_y - s_lvl * pk / (h ? h : 1);
         env[k].x[4] = x0 + w;           env[k].y[4] = bot_y;
     }
 
     /* 4. Spectral Gradient Background Glow (Dark to Light Harmonic Tones) */
     {
-        int32_t tot_mod = (lvl2 + lvl3 + fdbk) / 3;
+        int32_t tot_mod = (op_lvl[1] + op_lvl[2] + op_lvl[3]) / 3;
         uint16_t glow_col = (tot_mod < 25) ? FLOYD_OP1_COL :
                             (tot_mod < 60) ? FLOYD_OP2_COL :
                             (tot_mod < 95) ? FLOYD_OP3_COL : FLOYD_OP4_COL;
 
         /* Soft luminous aura under the sound */
-        for (int32_t p = 0; p < 4; p++) {
-            int32_t x_start = env[0].x[p], x_end = env[0].x[p + 1];
-            int32_t y_start = env[0].y[p], y_end = env[0].y[p + 1];
+        for (int32_t seg = 0; seg < 4; seg++) {
+            int32_t x_start = env[0].x[seg], x_end = env[0].x[seg + 1];
+            int32_t y_start = env[0].y[seg], y_end = env[0].y[seg + 1];
             for (int32_t px = x_start; px <= x_end; px++) {
                 int32_t py = (x_end == x_start) ? y_start : y_start + (y_end - y_start) * (px - x_start) / (x_end - x_start);
                 if (py < bot_y) {
@@ -547,12 +537,12 @@ static void graph_floyd(const track_t *t, uint16_t c)
         uint16_t dim_col = rgb_blend(col, C_BLACK, 85);
 
         /* Polyline */
-        for (int32_t p = 0; p < 4; p++) {
-            cv_line(env[k].x[p], env[k].y[p], env[k].x[p + 1], env[k].y[p + 1], dim_col);
+        for (int32_t seg = 0; seg < 4; seg++) {
+            cv_line(env[k].x[seg], env[k].y[seg], env[k].x[seg + 1], env[k].y[seg + 1], dim_col);
         }
         /* Small Node Points */
-        for (int32_t p = 1; p <= 3; p++) {
-            cv_rect(env[k].x[p] - 1, env[k].y[p] - 1, 3, 3, dim_col);
+        for (int32_t p_idx = 1; p_idx <= 3; p_idx++) {
+            cv_rect(env[k].x[p_idx] - 1, env[k].y[p_idx] - 1, 3, 3, dim_col);
         }
     }
 
@@ -562,30 +552,30 @@ static void graph_floyd(const track_t *t, uint16_t c)
         uint16_t col = OP_COLS[k];
 
         /* Bold 2px Line */
-        for (int32_t p = 0; p < 4; p++) {
-            cv_line(env[k].x[p], env[k].y[p], env[k].x[p + 1], env[k].y[p + 1], col);
-            cv_line(env[k].x[p], env[k].y[p] - 1, env[k].x[p + 1], env[k].y[p + 1] - 1, col);
+        for (int32_t seg = 0; seg < 4; seg++) {
+            cv_line(env[k].x[seg], env[k].y[seg], env[k].x[seg + 1], env[k].y[seg + 1], col);
+            cv_line(env[k].x[seg], env[k].y[seg] - 1, env[k].x[seg + 1], env[k].y[seg + 1] - 1, col);
         }
 
         /* Large 5x5 Points with White Center */
-        for (int32_t p = 0; p <= 4; p++) {
-            int32_t px = env[k].x[p], py = env[k].y[p];
+        for (int32_t p_idx = 0; p_idx <= 4; p_idx++) {
+            int32_t px = env[k].x[p_idx], py = env[k].y[p_idx];
             cv_rect(px - 2, py - 2, 5, 5, col);
             cv_rect(px - 1, py - 1, 3, 3, C_WHITE);
         }
 
         /* Target Halo for Active Parameter Node */
         int32_t hx = -1, hy = -1;
-        if (hot == P_ATK) {
-            hx = env[k].x[1]; hy = env[k].y[1];
-        } else if (hot == P_DEC || hot == P_E5) {
-            hx = env[k].x[2]; hy = env[k].y[2];
-        } else if (hot == P_SUS) {
-            hx = (env[k].x[2] + env[k].x[3]) / 2; hy = env[k].y[2];
-        } else if (hot == P_REL) {
-            hx = env[k].x[4]; hy = env[k].y[4];
-        } else if (hot == P_E4 || hot == P_E6 || hot == P_E7 || hot == P_E1 || hot == P_E2 || hot == P_E3) {
-            hx = env[k].x[1]; hy = env[k].y[1];
+        if (ui.hot_t) {
+            uint32_t hcol = ui.hot_col & 3u;
+            if (pg->scope == SC_FLOYD && pg->title[0] == 'O' && pg->title[1] == 'P') {
+                if (hcol == 0) { hx = env[k].x[1]; hy = env[k].y[1]; }
+                else if (hcol == 1) { hx = env[k].x[2]; hy = env[k].y[2]; }
+                else if (hcol == 2) { hx = (env[k].x[2] + env[k].x[3]) / 2; hy = env[k].y[2]; }
+                else if (hcol == 3) { hx = env[k].x[4]; hy = env[k].y[4]; }
+            } else {
+                hx = env[k].x[1]; hy = env[k].y[1];
+            }
         }
 
         if (hx >= 0) {
@@ -600,7 +590,7 @@ static void graph_floyd(const track_t *t, uint16_t c)
     for (uint32_t i = 0; i < NVOICE; i++) {
         const voice_t *v = &t->v[i];
         if (v->active && v->gate && v->stage <= 2) {
-            int32_t tx = x0 + c_a;
+            int32_t tx = x0 + clamp(op_atk[0] * 40 / 127, 2, 40);
             int32_t ty = bot_y - (v->env >> 14) * h / 1000;
             ty = clamp(ty, top_y, bot_y);
             cv_rect(tx - 2, ty - 2, 5, 5, C_WHITE);
@@ -1146,7 +1136,7 @@ static void draw_foot(void)
         uint32_t i, n = 0, k = 0;
         const char *pt = pg->scope == SC_ENGINE ? e->page_title[pg->id[0] != P_E0] : 0;   /* EDIT: the engine's */
         for (i = 0; i < NPAGES; i++)
-            if (PAGES[i].fam == pg->fam) {
+            if (PAGES[i].fam == pg->fam && page_valid_for_trk(&PAGES[i])) {
                 n++;
                 if (i == ui.page)
                     k = n;
