@@ -5,7 +5,7 @@
  * op 4 with feedback, Option B Decay/Sustain combined macro (DSUS = P_E5).
  * Phase modulation wraps naturally in the 32-bit phase. */
 
-static const char *const N_FLOYD_ALG[] = {"3-TO-1", "DUAL", "CASCADE", "ORGAN"};
+static const char *const N_FLOYD_ALG[] = {"STACK", "(3+4)>2>1", "(2+4)>1", "(2+3)>1", "DUAL", "3-TO-1", "4>3, 1, 2", "ORGAN"};
 static const char *const N_FLOYD_RATIO[] = {".5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "14", "16"};
 static const uint16_t FLOYD_RATIO_Q8[15] = {128, 256, 512, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2560, 2816,
                                             3072, 3584, 4096};
@@ -31,7 +31,7 @@ static inline uint32_t floyd_mod(int32_t x, int32_t idx) { return (uint32_t)(x *
 static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
-    uint32_t alg = (uint32_t)p[P_E0] & 3u, i;
+    uint32_t alg = (uint32_t)p[P_E0] & 7u, i;
     uint32_t i1 = m->inc;
     uint32_t i2 = floyd_ratio_inc(m->inc, FLOYD_RATIO_Q8[p[P_E1] % 15]);
     uint32_t i3 = floyd_ratio_inc(m->inc, FLOYD_RATIO_Q8[p[P_E2] % 15]);
@@ -71,26 +71,51 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
 
         switch (alg) {
         case 0:
-            /* Algo 1: 3-to-1 Parallel (4+3+2) -> 1 (Floyd Steinberg default) */
-            o3 = sine_i(ph2);
-            o2 = sine_i(ph1);
-            s = sine_i(ph0 + floyd_mod(mulq15(o2 + o3 + o4, 10923), idx));
+            /* Alg 1: STACK 4 -> 3 -> 2 -> 1 */
+            o3 = sine_i(ph2 + floyd_mod(o4, idx));
+            o2 = sine_i(ph1 + floyd_mod(o3, idx));
+            s = sine_i(ph0 + floyd_mod(o2, idx));
             break;
         case 1:
-            /* Algo 2: Dual Carrier 2 -> 1 and 4 -> 3 */
+            /* Alg 2: (3+4) -> 2 -> 1 */
+            o3 = sine_i(ph2);
+            o2 = sine_i(ph1 + floyd_mod((o3 + o4) >> 1, idx));
+            s = sine_i(ph0 + floyd_mod(o2, idx));
+            break;
+        case 2:
+            /* Alg 3: (2+4) -> 1, 3 -> 2 */
+            o3 = sine_i(ph2);
+            o2 = sine_i(ph1 + floyd_mod(o3, idx));
+            s = sine_i(ph0 + floyd_mod((o2 + o4) >> 1, idx));
+            break;
+        case 3:
+            /* Alg 4: (2+3) -> 1, 4 -> 3 */
+            o3 = sine_i(ph2 + floyd_mod(o4, idx));
+            o2 = sine_i(ph1);
+            s = sine_i(ph0 + floyd_mod((o2 + o3) >> 1, idx));
+            break;
+        case 4:
+            /* Alg 5: DUAL 2 -> 1, 4 -> 3 */
             o3 = sine_i(ph2 + floyd_mod(o4, idx));
             o2 = sine_i(ph1);
             o1 = sine_i(ph0 + floyd_mod(o2, idx));
             s = (o1 + o3) >> 1;
             break;
-        case 2:
-            /* Algo 3: Serial Cascade 4-Stack 4 -> 3 -> 2 -> 1 */
+        case 5:
+            /* Alg 6: 3-TO-1 / FAN (4+3+2) -> 1 (Floyd Steinberg default) */
+            o3 = sine_i(ph2);
+            o2 = sine_i(ph1);
+            s = sine_i(ph0 + floyd_mod(mulq15(o2 + o3 + o4, 10923), idx));
+            break;
+        case 6:
+            /* Alg 7: 4 -> 3, 1, 2 */
             o3 = sine_i(ph2 + floyd_mod(o4, idx));
-            o2 = sine_i(ph1 + floyd_mod(o3, idx));
-            s = sine_i(ph0 + floyd_mod(o2, idx));
+            o2 = sine_i(ph1);
+            o1 = sine_i(ph0);
+            s = mulq15(o1 + o2 + o3, 10923);
             break;
         default:
-            /* Algo 4: Organ / Additive Parallel 1 + 2 + 3 + 4 -> Out */
+            /* Alg 8: ORGAN / PARALLEL 1 + 2 + 3 + 4 -> Out */
             o3 = sine_i(ph2);
             o2 = sine_i(ph1);
             o1 = sine_i(ph0);
@@ -115,20 +140,20 @@ static void floyd_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const
 
 static const preset_t FLOYD_PRESETS[] = {
     /* ALG R2 R3 R4 DEPTH DSUS FDBK OP */
-    {"FLOYD TINE", {0, 1, 2, 7, 75, 40, 0, 0}, {0, 85, 35, 55}, 0, 0, FX(0, 32, 14, 28), XP(P_LD_AMP + 1, 26, P_LRATE + 1, 84)},
-    {"DUAL LEAD",  {1, 1, 2, 3, 80, 85, 20, 0}, {2, 70, 75, 40}, 0, 1, FX(15, 20, 20, 30), XP(P_GLIDE + 1, 25)},
-    {"STACK BASS", {2, 1, 1, 1, 60, 32, 16, 0}, {0, 58, 65, 22}, 0, 1, FX(10, 0, 0, 8), XP(P_TRANS + 1, -24, P_GLIDE + 1, 30)},
-    {"ORGAN 4",    {3, 2, 3, 4, 0, 100, 0, 0},  {2, 60, 120, 30}, 0, 0, FX(0, 40, 0, 25), XP(P_LD_AMP + 1, 18, P_LRATE + 1, 95)},
-    {"CRYSTAL",    {0, 3, 5, 9, 65, 90, 0, 0},  {0, 92, 0, 75}, 0, 0, FX(0, 30, 35, 50)},
-    {"METALLIC",   {2, 1, 7, 11, 90, 28, 30, 0}, {0, 65, 20, 45}, 0, 0, FX(20, 10, 25, 35)},
-    {"WARM SINE",  {0, 1, 1, 1, 25, 60, 0, 0},  {5, 80, 40, 60}, 0, 0, FX(0, 25, 10, 20)},
-    {"VELVET PAD", {1, 1, 1, 2, 45, 110, 0, 0}, {60, 90, 110, 90}, 0, 0, FX(0, 50, 30, 65), XP(P_LD_PIT + 1, 1, P_LRATE + 1, 38)},
+    {"FLOYD TINE", {5, 1, 2, 7, 75, 40, 0, 0}, {0, 85, 35, 55}, 0, 0, FX(0, 32, 14, 28), XP(P_LD_AMP + 1, 26, P_LRATE + 1, 84)},
+    {"DUAL LEAD",  {4, 1, 2, 3, 80, 85, 20, 0}, {2, 70, 75, 40}, 0, 1, FX(15, 20, 20, 30), XP(P_GLIDE + 1, 25)},
+    {"STACK BASS", {0, 1, 1, 1, 60, 32, 16, 0}, {0, 58, 65, 22}, 0, 1, FX(10, 0, 0, 8), XP(P_TRANS + 1, -24, P_GLIDE + 1, 30)},
+    {"ORGAN 4",    {7, 2, 3, 4, 0, 100, 0, 0},  {2, 60, 120, 30}, 0, 0, FX(0, 40, 0, 25), XP(P_LD_AMP + 1, 18, P_LRATE + 1, 95)},
+    {"CRYSTAL",    {5, 3, 5, 9, 65, 90, 0, 0},  {0, 92, 0, 75}, 0, 0, FX(0, 30, 35, 50)},
+    {"METALLIC",   {0, 1, 7, 11, 90, 28, 30, 0}, {0, 65, 20, 45}, 0, 0, FX(20, 10, 25, 35)},
+    {"WARM SINE",  {5, 1, 1, 1, 25, 60, 0, 0},  {5, 80, 40, 60}, 0, 0, FX(0, 25, 10, 20)},
+    {"VELVET PAD", {4, 1, 1, 2, 45, 110, 0, 0}, {60, 90, 110, 90}, 0, 0, FX(0, 50, 30, 65), XP(P_LD_PIT + 1, 1, P_LRATE + 1, 38)},
 };
 
 static const engine_t ENG_FLOYD = {
     "FLOYD", {"ALGO", "MOD"},
     {
-        {"ALG", F_ENUM, 0, 3, 0, N_FLOYD_ALG, 0},
+        {"ALG", F_ENUM, 0, 7, 5, N_FLOYD_ALG, 0},
         {"R2", F_ENUM, 0, 14, 1, N_FLOYD_RATIO, 0},
         {"R3", F_ENUM, 0, 14, 2, N_FLOYD_RATIO, 0},
         {"R4", F_ENUM, 0, 14, 4, N_FLOYD_RATIO, 0},
