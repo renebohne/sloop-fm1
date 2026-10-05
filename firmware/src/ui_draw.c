@@ -770,7 +770,15 @@ static uint32_t graph_signature(void)
             ph = 0xFFFFu;                            /* the roll shows the cursor's bank only */
         h ^= steps_hash(t) + ph * 31u + ui.cursor * 7919u;
     }
-    if (pg->scope == SC_ENGINE && (ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL || ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD)) {
+    if (pg->scope == SC_FLOYD) {
+        uint32_t part = floyd_part(t);
+        for (i = 0; i < 4u; i++) {
+            h ^= (uint32_t)floyd_state[part].atk[i] * 19u + (uint32_t)floyd_state[part].dec[i] * 23u +
+                 (uint32_t)floyd_state[part].sus[i] * 29u + (uint32_t)floyd_state[part].rel[i] * 31u +
+                 (uint32_t)floyd_state[part].lvl[i] * 37u;
+        }
+    }
+    if ((pg->scope == SC_ENGINE || pg->scope == SC_FLOYD) && (ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL || ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD)) {
         uint32_t v_active = 0;
         for (i = 0; i < NVOICE; i++)
             if (t->v[i].active && t->v[i].gate)
@@ -1058,7 +1066,7 @@ static void draw_graph(void)
             graph_digital_alg(t, c);
         else if (pg->id[0] == P_E4)
             graph_digital_timbre(t, c);
-    } else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD) {
+    } else if ((pg->scope == SC_ENGINE || pg->scope == SC_FLOYD) && ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD) {
         graph_floyd(t, c);
     } else {
         switch (pg->graph) {
