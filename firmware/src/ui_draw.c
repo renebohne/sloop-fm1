@@ -593,34 +593,36 @@ static void graph_floyd(const track_t *t, uint16_t c)
         if (v->active && v->stage > 0 && v->stage <= 3) {
             int32_t stage = (trace_op == 0) ? v->stage : v->s[trace_op + 2u];
             int32_t env_val = (trace_op == 0) ? v->env : v->s[trace_op - 1u];
-            int32_t sus_val = (trace_op == 0) ? ((int32_t)t->p[P_SUS] * ((1 << 24) / 127))
+            int32_t sus_val = (trace_op == 0) ? ((int32_t)t->p[P_SUS] << 17)
                                               : ((int32_t)floyd_state[p].sus[trace_op] * ((1 << 24) / 127));
+            int32_t pk = (trace_op == 0 || (FLOYD_MOD_MASK[alg] & (1u << trace_op)) == 0) ? h : clamp(op_lvl[trace_op] * h / 127, 4, h);
 
-            int32_t tx = env[trace_op].x[0], ty = env[trace_op].y[0];
-            if (stage == 1) { /* Attack */
+            int32_t tx = env[trace_op].x[0];
+            int32_t ty = bot_y - (env_val * pk >> 24);
+
+            if (stage == 1) { /* Attack: from x[0] to x[1] */
                 int32_t frac = clamp(env_val >> 12, 0, 4096);
                 tx = env[trace_op].x[0] + (env[trace_op].x[1] - env[trace_op].x[0]) * frac / 4096;
-                ty = env[trace_op].y[0] + (env[trace_op].y[1] - env[trace_op].y[0]) * frac / 4096;
-            } else if (stage == 2) { /* Decay & Sustain */
-                if (env_val > sus_val + 4096 && (1 << 24) > sus_val) {
-                    int32_t d_range = (1 << 24) - sus_val;
-                    int32_t d_prog = ((1 << 24) - env_val) * 4096 / (d_range ? d_range : 1);
+            } else if (stage == 2) { /* Decay & Sustain: from x[1] to x[2], then along sustain x[2]..x[3] */
+                int32_t d_range = (1 << 24) - sus_val;
+                if (env_val > sus_val + 8192 && d_range > 8192) {
+                    /* Smooth continuous decay progress */
+                    int32_t d_prog = ((1 << 24) - env_val) * 4096 / d_range;
                     d_prog = clamp(d_prog, 0, 4096);
                     tx = env[trace_op].x[1] + (env[trace_op].x[2] - env[trace_op].x[1]) * d_prog / 4096;
-                    ty = env[trace_op].y[1] + (env[trace_op].y[2] - env[trace_op].y[1]) * d_prog / 4096;
                 } else {
-                    tx = (env[trace_op].x[2] + env[trace_op].x[3]) / 2;
-                    ty = env[trace_op].y[2];
+                    /* Sustain plateau: moves gently across sustain width with voice age */
+                    int32_t sus_width = env[trace_op].x[3] - env[trace_op].x[2];
+                    int32_t sus_offset = clamp((int32_t)v->age * 2, 0, sus_width > 0 ? sus_width : 0);
+                    tx = env[trace_op].x[2] + sus_offset;
                 }
-            } else if (stage == 3) { /* Release */
+            } else if (stage == 3) { /* Release: from x[3] to x[4] */
                 if (sus_val > 4096) {
                     int32_t r_prog = (sus_val - env_val) * 4096 / sus_val;
                     r_prog = clamp(r_prog, 0, 4096);
                     tx = env[trace_op].x[3] + (env[trace_op].x[4] - env[trace_op].x[3]) * r_prog / 4096;
-                    ty = env[trace_op].y[3] + (env[trace_op].y[4] - env[trace_op].y[3]) * r_prog / 4096;
                 } else {
                     tx = env[trace_op].x[4];
-                    ty = env[trace_op].y[4];
                 }
             }
 
