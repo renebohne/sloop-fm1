@@ -586,15 +586,49 @@ static void graph_floyd(const track_t *t, uint16_t c)
         }
     }
 
-    /* 7. Live Note Tracer */
+    /* 7. Live Note Tracer (Follows the active operator's real ADSR trajectory) */
+    uint32_t trace_op = (active_op >= 0 && active_op < 4) ? (uint32_t)active_op : 0u;
     for (uint32_t i = 0; i < NVOICE; i++) {
         const voice_t *v = &t->v[i];
-        if (v->active && v->gate && v->stage <= 2) {
-            int32_t tx = x0 + clamp(op_atk[0] * 40 / 127, 2, 40);
-            int32_t ty = bot_y - (v->env >> 14) * h / 1000;
+        if (v->active && v->stage > 0 && v->stage <= 3) {
+            int32_t stage = (trace_op == 0) ? v->stage : v->s[trace_op + 2u];
+            int32_t env_val = (trace_op == 0) ? v->env : v->s[trace_op - 1u];
+            int32_t sus_val = (trace_op == 0) ? ((int32_t)t->p[P_SUS] * ((1 << 24) / 127))
+                                              : ((int32_t)floyd_state[p].sus[trace_op] * ((1 << 24) / 127));
+
+            int32_t tx = env[trace_op].x[0], ty = env[trace_op].y[0];
+            if (stage == 1) { /* Attack */
+                int32_t frac = clamp(env_val >> 12, 0, 4096);
+                tx = env[trace_op].x[0] + (env[trace_op].x[1] - env[trace_op].x[0]) * frac / 4096;
+                ty = env[trace_op].y[0] + (env[trace_op].y[1] - env[trace_op].y[0]) * frac / 4096;
+            } else if (stage == 2) { /* Decay & Sustain */
+                if (env_val > sus_val + 4096 && (1 << 24) > sus_val) {
+                    int32_t d_range = (1 << 24) - sus_val;
+                    int32_t d_prog = ((1 << 24) - env_val) * 4096 / (d_range ? d_range : 1);
+                    d_prog = clamp(d_prog, 0, 4096);
+                    tx = env[trace_op].x[1] + (env[trace_op].x[2] - env[trace_op].x[1]) * d_prog / 4096;
+                    ty = env[trace_op].y[1] + (env[trace_op].y[2] - env[trace_op].y[1]) * d_prog / 4096;
+                } else {
+                    tx = (env[trace_op].x[2] + env[trace_op].x[3]) / 2;
+                    ty = env[trace_op].y[2];
+                }
+            } else if (stage == 3) { /* Release */
+                if (sus_val > 4096) {
+                    int32_t r_prog = (sus_val - env_val) * 4096 / sus_val;
+                    r_prog = clamp(r_prog, 0, 4096);
+                    tx = env[trace_op].x[3] + (env[trace_op].x[4] - env[trace_op].x[3]) * r_prog / 4096;
+                    ty = env[trace_op].y[3] + (env[trace_op].y[4] - env[trace_op].y[3]) * r_prog / 4096;
+                } else {
+                    tx = env[trace_op].x[4];
+                    ty = env[trace_op].y[4];
+                }
+            }
+
+            tx = clamp(tx, x0, x0 + w);
             ty = clamp(ty, top_y, bot_y);
-            cv_rect(tx - 2, ty - 2, 5, 5, C_WHITE);
-            cv_rect(tx - 1, ty - 1, 3, 3, RGB(255, 230, 40));
+            cv_rect(tx - 3, ty - 3, 7, 7, C_WHITE);
+            cv_rect(tx - 2, ty - 2, 5, 5, OP_COLS[trace_op]);
+            cv_rect(tx - 1, ty - 1, 3, 3, RGB(255, 245, 100));
         }
     }
 }
