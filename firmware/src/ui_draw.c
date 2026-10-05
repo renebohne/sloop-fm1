@@ -203,6 +203,203 @@ static void graph_adsr(const track_t *t, uint16_t c)
 #undef EGY
 }
 
+/* ------------------------------------------------------------- FM4 --- */
+static const uint8_t FM4_CELL[8][4] = {
+    {0x00, 0x10, 0x20, 0x30}, {0x01, 0x11, 0x20, 0x22}, {0x01, 0x10, 0x20, 0x12}, {0x01, 0x12, 0x10, 0x20},
+    {0x00, 0x10, 0x02, 0x12}, {0x00, 0x02, 0x04, 0x12}, {0x00, 0x02, 0x04, 0x14}, {0x00, 0x02, 0x04, 0x06}
+};
+static const uint16_t FM4_MOD[8] = {
+    0x0842, 0x00C2, 0x004A, 0x0806, 0x0802, 0x0888, 0x0800, 0x0000
+};
+
+/* FM 4-operator interactive algorithm flowchart */
+static void graph_digital_alg(const track_t *t, uint16_t c)
+{
+    uint32_t alg = (uint32_t)t->p[P_E0] & 7u, k, j;
+    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 3u] : 0u;
+    int32_t x[4], y[4], lo = 7, hi = 0, bus = 78;
+    char alg_str[8] = {'A', 'L', 'G', ' ', (char)('1' + alg), 0};
+
+    cv_text(8, 2, &FONT_S, alg_str, hot == P_E0 ? C_WHITE : C_HI);
+
+    for (k = 0; k < 4u; k++) {
+        int32_t col = FM4_CELL[alg][k] & 7;
+        if (col < lo) lo = col;
+        if (col > hi) hi = col;
+    }
+    for (k = 0; k < 4u; k++) {
+        int32_t col = FM4_CELL[alg][k] & 7;
+        int32_t row = FM4_CELL[alg][k] >> 4;
+        x[k] = 120 + col * 32 - (lo + hi) * 16 - 18;
+        y[k] = bus - 18 - row * 20;
+    }
+
+    /* routes */
+    for (k = 0; k < 4u; k++) {
+        uint32_t m = (FM4_MOD[alg] >> (4u * k)) & 15u;
+        for (j = 0; j < 4u; j++) {
+            if (m & (1u << j)) {
+                int32_t sx = x[j] + 18, sy = y[j] + 16;
+                int32_t dx = x[k] + 18, dy = y[k];
+                if (sx == dx) {
+                    cv_line(sx, sy, dx, dy, TE_G3);
+                } else {
+                    int32_t mid_y = (sy + dy) / 2;
+                    cv_line(sx, sy, sx, mid_y, TE_G3);
+                    cv_line(sx, mid_y, dx, mid_y, TE_G3);
+                    cv_line(dx, mid_y, dx, dy, TE_G3);
+                }
+                cv_rect(dx - 1, dy - 2, 3, 2, C_WHITE);
+            }
+        }
+        /* Carrier output to bus */
+        if ((FM4_CELL[alg][k] >> 4) == 0) {
+            cv_line(x[k] + 18, y[k] + 16, x[k] + 18, bus, c);
+            cv_rect(x[k] + 17, bus, 3, 2, c);
+        }
+    }
+
+    /* Audio bus horizontal line */
+    cv_line(24, bus, 216, bus, C_LINE);
+    cv_text(220, bus - 6, &FONT_S, "OUT", c);
+
+    /* Feedback loop on Op 4 */
+    {
+        int32_t fx = x[3] + 36, fy = y[3] + 8;
+        uint16_t fb_col = t->p[P_E6] > 0 ? rgb_blend(TE_G3, C_WHITE, (uint32_t)clamp(t->p[P_E6] * 2, 0, 255)) : TE_G2;
+        cv_line(fx, fy, fx + 6, fy, fb_col);
+        cv_line(fx + 6, fy, fx + 6, fy - 12, fb_col);
+        cv_line(fx + 6, fy - 12, x[3] + 18, fy - 12, fb_col);
+        cv_line(x[3] + 18, fy - 12, x[3] + 18, y[3], fb_col);
+        cv_rect(x[3] + 17, y[3] - 2, 3, 2, fb_col);
+        if (t->p[P_E6] > 0)
+            cv_text(fx + 8, fy - 10, &FONT_S, "FB", fb_col);
+    }
+
+    /* Draw operator boxes */
+    for (k = 0; k < 4u; k++) {
+        int32_t bx = x[k], by = y[k];
+        int is_car = (FM4_CELL[alg][k] >> 4) == 0;
+        uint32_t op_hot = (k == 0 && hot == P_E0) || (k == 1 && hot == P_E1) || (k == 2 && hot == P_E2) || (k == 3 && hot == P_E3);
+        uint16_t border = op_hot ? C_WHITE : is_car ? c : TE_G3;
+        uint16_t bg = op_hot ? TE_G2 : is_car ? C_BLACK : TE_G1;
+        char num[2] = {(char)('1' + k), 0};
+        const char *r_str = (k == 0) ? "x1" : N_RATIO[t->p[P_E0 + k] % 15];
+
+        cv_rect(bx, by, 36, 16, border);
+        cv_rect(bx + 1, by + 1, 34, 14, bg);
+
+        cv_text(bx + 3, by + 1, &FONT_S, num, is_car ? C_WHITE : C_HI);
+        cv_text(bx + 14, by + 1, &FONT_S, r_str, op_hot ? C_WHITE : C_AMB);
+    }
+}
+
+/* Floyd Steinberg Visual Timbre Heatmap Envelope for FM synthesis */
+static void graph_digital_timbre(const track_t *t, uint16_t c)
+{
+    int32_t a = 4 + t->p[P_ATK] * 50 / 127, d = 6 + t->p[P_DEC] * 50 / 127, r = 6 + t->p[P_REL] * 60 / 127;
+    int32_t top = 12, bot = 88, sus = t->p[P_SUS] * 1000 / 127;
+    int32_t x0 = 8, x1 = x0 + a, x3 = 230 - r, i;
+    int32_t base_idx = t->p[P_E4];          /* 0..127 */
+    int32_t moddec = t->p[P_E5];            /* 0..127 */
+    int32_t px, py, pe, e;
+
+#define TIMBRE_COLOR(idx_val) \
+    ((idx_val) <= 32 ? rgb_blend(c, TE_MID[song.sel & 3u], (uint32_t)((idx_val) * 255) / 32u) : \
+     (idx_val) <= 80 ? rgb_blend(TE_MID[song.sel & 3u], RGB(255, 180, 24), (uint32_t)(((idx_val) - 32) * 255) / 48u) : \
+                       rgb_blend(RGB(255, 180, 24), C_WHITE, (uint32_t)(((idx_val) - 80) * 255) / 47u))
+
+    /* Header text */
+    cv_text(8, 0, &FONT_S, "TIMBRE HEATMAP", C_GRAY);
+    if (base_idx >= 80)
+        cv_text(160, 0, &FONT_S, "HOT / BITE", C_WHITE);
+    else if (base_idx >= 35)
+        cv_text(150, 0, &FONT_S, "HARMONIC", RGB(255, 180, 24));
+    else
+        cv_text(156, 0, &FONT_S, "MELLOW", C_DIM);
+
+    /* Background baseline */
+    cv_line(0, bot + 1, 239, bot + 1, C_LINE);
+
+    /* Attack phase */
+    px = x0; py = bot;
+    for (i = 0; i <= a; i++) {
+        int32_t cur_x = x0 + i;
+        int32_t lvl = (1000 * i) / (a ? a : 1);
+        int32_t cur_y = bot - lvl * (bot - top) / 1000;
+        int32_t cur_idx = (base_idx * i) / (a ? a : 1);
+        uint16_t col = TIMBRE_COLOR(cur_idx);
+        if (cur_y < bot)
+            cv_line(cur_x, cur_y + 1, cur_x, bot, rgb_blend(col, C_BLACK, 160));
+        cv_line(px, py, cur_x, cur_y, col);
+        px = cur_x; py = cur_y;
+    }
+
+    /* Decay phase */
+    e = 32768;
+    pe = 32768;
+    for (i = 1; i <= d; i++) {
+        int32_t cur_x = x1 + i;
+        e = (e * (32768 - 150733 / d)) >> 15;
+        pe = (pe * (32768 - clamp(moddec * 2500 / 127 + 500, 500, 32000) / d)) >> 15;
+        int32_t lvl = sus + ((1000 - sus) * e >> 15);
+        int32_t cur_y = bot - lvl * (bot - top) / 1000;
+        int32_t cur_idx = (base_idx * 25 / 100) + ((base_idx * 75 / 100) * pe >> 15);
+        uint16_t col = TIMBRE_COLOR(cur_idx);
+        if (cur_y < bot)
+            cv_line(cur_x, cur_y + 1, cur_x, bot, rgb_blend(col, C_BLACK, 160));
+        cv_line(px, py, cur_x, cur_y, col);
+        px = cur_x; py = cur_y;
+    }
+
+    /* Sustain phase */
+    {
+        int32_t cur_idx = base_idx * 25 / 100;
+        uint16_t col = TIMBRE_COLOR(cur_idx);
+        int32_t cur_y = bot - sus * (bot - top) / 1000;
+        for (i = px; i <= x3; i++) {
+            if (cur_y < bot)
+                cv_line(i, cur_y + 1, i, bot, rgb_blend(col, C_BLACK, 180));
+        }
+        cv_line(px, py, x3, cur_y, col);
+        px = x3; py = cur_y;
+    }
+
+    /* Release phase */
+    e = 32768;
+    for (i = 1; i <= r; i++) {
+        int32_t cur_x = x3 + i;
+        e = (e * (32768 - 150733 / r)) >> 15;
+        int32_t lvl = (sus * e) >> 15;
+        int32_t cur_y = bot - lvl * (bot - top) / 1000;
+        int32_t cur_idx = (base_idx * 25 / 100) * e >> 15;
+        uint16_t col = TIMBRE_COLOR(cur_idx);
+        if (cur_y < bot)
+            cv_line(cur_x, cur_y + 1, cur_x, bot, rgb_blend(col, C_BLACK, 200));
+        cv_line(px, py, cur_x, cur_y, col);
+        px = cur_x; py = cur_y;
+    }
+
+    /* Live Voice Tracker */
+    for (i = 0; i < NVOICE; i++) {
+        const voice_t *v = &t->v[i];
+        if (v->active && v->gate && v->stage <= 2) {
+            int32_t vx = x1;
+            if (v->stage == 1) {
+                vx = x0 + a / 2;
+            } else if (v->stage == 2) {
+                vx = x1 + d / 2;
+            }
+            int32_t vy = bot - (v->env >> 14) * (bot - top) / 1000;
+            vy = clamp(vy, top - 2, bot);
+            cv_rect(vx - 2, vy - 2, 5, 5, C_WHITE);
+            cv_rect(vx - 1, vy - 1, 3, 3, RGB(255, 60, 40));
+        }
+    }
+
+#undef TIMBRE_COLOR
+}
+
 static void graph_lfo(const track_t *t, uint16_t c)
 {
     int32_t x, py = 50;
@@ -373,6 +570,13 @@ static uint32_t graph_signature(void)
         if (pg->graph == GR_ROLL && ph / 16u != ui.bank)
             ph = 0xFFFFu;                            /* the roll shows the cursor's bank only */
         h ^= steps_hash(t) + ph * 31u + ui.cursor * 7919u;
+    }
+    if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL) {
+        uint32_t v_active = 0;
+        for (i = 0; i < NVOICE; i++)
+            if (t->v[i].active && t->v[i].gate)
+                v_active |= (1u << i) | ((t->v[i].env >> 16) << (4u + i * 4u));
+        h ^= v_active + (ui.frame / 2u) * (v_active != 0);
     }
     return h;
 }
@@ -650,6 +854,11 @@ static void draw_graph(void)
         static const char *const L[2] = {"DRUM TRACK", "SEQ  TRACKS  GLO DRUMS"};
         cv_text((240 - text_w(&FONT_S, L[0])) / 2, 26, &FONT_S, L[0], C_HI);
         cv_text((240 - text_w(&FONT_S, L[1])) / 2, 52, &FONT_S, L[1], C_DIM);
+    } else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL) {
+        if (pg->id[0] == P_E0)
+            graph_digital_alg(t, c);
+        else if (pg->id[0] == P_E4)
+            graph_digital_timbre(t, c);
     } else {
         switch (pg->graph) {
         case GR_ADSR:
