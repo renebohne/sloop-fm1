@@ -603,30 +603,23 @@ static void graph_floyd(const track_t *t, uint16_t c)
             if (stage == 1) { /* Attack: from x[0] to x[1] */
                 int32_t frac = clamp(env_val >> 12, 0, 4096);
                 tx = env[trace_op].x[0] + (env[trace_op].x[1] - env[trace_op].x[0]) * frac / 4096;
-            } else if (stage == 2) { /* Decay & Sustain: from x[1] to x[2], then along sustain x[2]..x[3] */
+            } else if (stage == 2) { /* Decay & Sustain: from x[1] to x[2], then across sustain x[2]..x[3] */
                 int32_t d_range = (1 << 24) - sus_val;
                 if (env_val > sus_val + 8192 && d_range > 8192) {
-                    /* Smooth continuous decay progress */
                     int32_t d_prog = ((1 << 24) - env_val) * 4096 / d_range;
                     d_prog = clamp(d_prog, 0, 4096);
                     tx = env[trace_op].x[1] + (env[trace_op].x[2] - env[trace_op].x[1]) * d_prog / 4096;
                 } else {
-                    /* Sustain plateau: moves gently across sustain width with voice age */
-                    int32_t sus_width = env[trace_op].x[3] - env[trace_op].x[2];
-                    int32_t sus_offset = clamp((int32_t)v->age * 2, 0, sus_width > 0 ? sus_width : 0);
-                    tx = env[trace_op].x[2] + sus_offset;
+                    int32_t s_range = env[trace_op].x[3] - env[trace_op].x[2];
+                    int32_t s_prog = clamp((int32_t)v->age * 3, 0, s_range > 0 ? s_range : 0);
+                    tx = env[trace_op].x[2] + s_prog;
                 }
-            } else if (stage == 3) { /* Release: smooth decay down to baseline from sustain position */
-                int32_t sus_width = env[trace_op].x[3] - env[trace_op].x[2];
-                int32_t sus_offset = clamp((int32_t)v->age * 2, 0, sus_width > 0 ? sus_width : 0);
-                int32_t x_rel_start = env[trace_op].x[2] + sus_offset;
-                int32_t r_width = env[trace_op].x[4] - env[trace_op].x[3];
-                if (r_width < 10) r_width = 10;
-
-                int32_t r_denom = sus_val > 4096 ? sus_val : (1 << 20);
-                int32_t r_prog = ((r_denom - env_val) * 4096) / r_denom;
-                r_prog = clamp(r_prog, 0, 4096);
-                tx = x_rel_start + r_width * r_prog / 4096;
+            } else if (stage == 3) { /* Release: from x[3] to x[4] */
+                int32_t r_prog = 4096;
+                if (sus_val > 4096) {
+                    r_prog = clamp(((sus_val - env_val) * 4096) / sus_val, 0, 4096);
+                }
+                tx = env[trace_op].x[3] + (env[trace_op].x[4] - env[trace_op].x[3]) * r_prog / 4096;
             }
 
             tx = clamp(tx, x0, x0 + w);
@@ -819,9 +812,11 @@ static uint32_t graph_signature(void)
     }
     if ((pg->scope == SC_ENGINE || pg->scope == SC_FLOYD) && (ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL || ENGINES[t->eng_req % NENGINES] == &ENG_FLOYD)) {
         uint32_t v_active = 0;
-        for (i = 0; i < NVOICE; i++)
-            if (t->v[i].active && t->v[i].gate)
-                v_active |= (1u << i) | ((t->v[i].env >> 16) << (4u + i * 4u));
+        for (i = 0; i < NVOICE; i++) {
+            if (t->v[i].active) {
+                v_active |= (1u << i) | ((uint32_t)(t->v[i].env >> 16) << (4u + (i % 4u) * 4u)) | ((uint32_t)t->v[i].stage << (20u + (i % 8u)));
+            }
+        }
         h ^= v_active + (ui.frame / 2u) * (v_active != 0);
     }
     return h;
