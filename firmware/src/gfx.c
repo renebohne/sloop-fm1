@@ -59,9 +59,13 @@ static const uint16_t SPECTRAL_LUT_RGB565[12] = {
     0xF900  /* Step 11: Fiery Red (Max FM brightness) */
 };
 
-#define GHOST_OP2 RGB(24, 60, 140)
-#define GHOST_OP3 RGB(20, 100, 40)
-#define GHOST_OP4 RGB(140, 100, 20)
+#define FLOYD_OP1_COL RGB(0, 225, 255)   /* Electric Cyan / Sky Blue */
+#define FLOYD_OP2_COL RGB(255, 175, 10)   /* Vivid Amber Gold */
+#define FLOYD_OP3_COL RGB(40, 240, 110)   /* Spring Emerald Green */
+#define FLOYD_OP4_COL RGB(255, 55, 140)   /* Hot Magenta / Crimson */
+#define GHOST_OP2 FLOYD_OP2_COL
+#define GHOST_OP3 FLOYD_OP3_COL
+#define GHOST_OP4 FLOYD_OP4_COL
 
 static void palette_set(uint32_t i)
 {
