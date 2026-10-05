@@ -50,6 +50,16 @@ static void palette_set(uint32_t i)
         pal[k] = PALETTES[i % NPALETTES].c[k];
 }
 
+static inline uint16_t rgb_blend(uint16_t c1, uint16_t c2, uint32_t t_q8)
+{
+    uint32_t r1 = (c1 >> 11) & 31u, g1 = (c1 >> 5) & 63u, b1 = c1 & 31u;
+    uint32_t r2 = (c2 >> 11) & 31u, g2 = (c2 >> 5) & 63u, b2 = c2 & 31u;
+    uint32_t r = (r1 * (256u - t_q8) + r2 * t_q8) >> 8;
+    uint32_t g = (g1 * (256u - t_q8) + g2 * t_q8) >> 8;
+    uint32_t b = (b1 * (256u - t_q8) + b2 * t_q8) >> 8;
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
 static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
 
 static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)

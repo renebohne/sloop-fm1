@@ -203,6 +203,186 @@ static void graph_adsr(const track_t *t, uint16_t c)
 #undef EGY
 }
 
+/* ------------------------------------------------------------- FM4 --- */
+static const uint8_t FM4_CELL[8][4] = {
+    {0x00, 0x10, 0x20, 0x30}, {0x01, 0x11, 0x20, 0x22}, {0x01, 0x10, 0x20, 0x12}, {0x01, 0x12, 0x10, 0x20},
+    {0x00, 0x10, 0x02, 0x12}, {0x00, 0x02, 0x04, 0x12}, {0x00, 0x02, 0x04, 0x14}, {0x00, 0x02, 0x04, 0x06}
+};
+static const uint16_t FM4_MOD[8] = {
+    0x0842, 0x00C2, 0x004A, 0x0806, 0x0802, 0x0888, 0x0800, 0x0000
+};
+static const char *const FM4_ROUTING_NAMES[8] = {
+    "4 > 3 > 2 > 1", "(3+4) > 2 > 1", "(2+4) > 1, 3 > 2", "(2+3) > 1, 4 > 3",
+    "2 > 1, 4 > 3", "4 > (1, 2, 3)", "4 > 3, 1, 2", "1, 2, 3, 4 [PARALLEL]"
+};
+
+/* Floyd Steinberg 4-Operator Visual FM Synthesizer Interface */
+static void graph_digital_floyd_ui(const track_t *t, uint16_t c, int page_idx)
+{
+    uint32_t alg = (uint32_t)t->p[P_E0] & 7u, k;
+    uint32_t hot = ui.hot_t ? (uint32_t)cur_page()->id[ui.hot_col & 3u] : 0u;
+    int32_t base_idx = t->p[P_E4];          /* 0..127 */
+    int32_t moddec = t->p[P_E5];            /* 0..127 */
+    int32_t fdbk = t->p[P_E6];              /* 0..127 */
+    int32_t atk = t->p[P_ATK], dec = t->p[P_DEC], sus = t->p[P_SUS], rel = t->p[P_REL];
+    char alg_hdr[32];
+
+    /* Top Routing Status Bar */
+    str_cpy(alg_hdr, "ALG ", sizeof alg_hdr);
+    alg_hdr[4] = (char)('1' + alg);
+    alg_hdr[5] = ':';
+    alg_hdr[6] = ' ';
+    alg_hdr[7] = 0;
+    str_cpy(alg_hdr + 7, FM4_ROUTING_NAMES[alg], (unsigned)(sizeof(alg_hdr) - 7u));
+    cv_text(4, 0, &FONT_S, alg_hdr, hot == P_E0 ? C_WHITE : C_HI);
+    cv_line(0, 13, 239, 13, TE_G2);
+
+    /* 4 Side-By-Side Operator Columns */
+    for (k = 0; k < 4u; k++) {
+        int32_t cx = 2 + (int32_t)k * 60;
+        int is_car = (FM4_CELL[alg][k] >> 4) == 0;
+        int is_fb = (k == 3 && fdbk > 0);
+        uint32_t is_hot = 0;
+
+        if (page_idx == 0) {
+            is_hot = (k == 0 && hot == P_E0) || (k == 1 && hot == P_E1) || (k == 2 && hot == P_E2) || (k == 3 && hot == P_E3);
+        } else {
+            is_hot = (k == 0 && hot == P_E4) || (k == 1 && hot == P_E5) || (k == 2 && hot == P_E6) || (k == 3 && hot == P_E7);
+        }
+
+        /* Color Theme per operator role */
+        uint16_t op_col = is_car ? RGB(30, 204, 112) : (k == 1) ? RGB(255, 198, 24) : (k == 2) ? RGB(255, 120, 20) : RGB(255, 44, 52);
+        uint16_t border_col = is_hot ? C_WHITE : is_car ? op_col : TE_G3;
+        uint16_t bg_col = is_hot ? TE_G2 : C_BLACK;
+
+        /* Card Outer Frame */
+        cv_rect(cx, 15, 56, 78, border_col);
+        cv_rect(cx + 1, 16, 54, 76, bg_col);
+
+        /* Operator Badge & Title */
+        char op_tag[8];
+        op_tag[0] = 'O'; op_tag[1] = 'P'; op_tag[2] = (char)('1' + k); op_tag[3] = 0;
+        cv_text(cx + 3, 17, &FONT_S, op_tag, is_car ? C_WHITE : op_col);
+
+        const char *role_str = is_car ? "CAR" : is_fb ? "FB" : "MOD";
+        cv_text(cx + 30, 17, &FONT_S, role_str, is_car ? op_col : is_fb ? RGB(255, 60, 60) : RGB(255, 180, 24));
+
+        /* Ratio Text */
+        const char *r_str = (k == 0) ? "x1.0" : N_RATIO[t->p[P_E0 + k] % 15];
+        char r_buf[8];
+        if (k == 0) {
+            str_cpy(r_buf, "x1.0", sizeof r_buf);
+        } else {
+            r_buf[0] = 'x';
+            r_buf[1] = 0;
+            str_cpy(r_buf + 1, r_str, (unsigned)(sizeof(r_buf) - 1u));
+        }
+        cv_text(cx + 3, 30, &FONT_S, r_buf, is_hot ? C_WHITE : C_AMB);
+
+        /* Individual Floyd Steinberg Color-Gradient Envelope */
+        {
+            int32_t env_x0 = cx + 3, env_w = 50;
+            int32_t env_top = 42, env_bot = 74, env_h = env_bot - env_top;
+            int32_t op_a = 2 + atk * 12 / 127;
+            int32_t op_d = 2 + (is_car ? dec : clamp(moddec * 20 / 127 + 2, 2, 20));
+            int32_t op_r = 2 + rel * 14 / 127;
+            int32_t op_s = is_car ? (sus * env_h / 127) : (base_idx * env_h / 127 / 4);
+            int32_t op_peak = is_car ? env_h : clamp(base_idx * env_h / 127, 4, env_h);
+            int32_t px = env_x0, py = env_bot, i;
+
+            /* Baseline */
+            cv_line(env_x0, env_bot + 1, env_x0 + env_w - 1, env_bot + 1, TE_G2);
+
+            /* Attack */
+            for (i = 0; i <= op_a; i++) {
+                int32_t cur_x = env_x0 + i;
+                int32_t cur_lvl = (op_peak * i) / (op_a ? op_a : 1);
+                int32_t cur_y = env_bot - cur_lvl;
+                uint16_t h_col = is_car ? rgb_blend(op_col, C_WHITE, (uint32_t)(cur_lvl * 255 / env_h)) :
+                                          rgb_blend(op_col, C_WHITE, (uint32_t)(cur_lvl * 255 / env_h));
+                if (cur_y < env_bot)
+                    cv_line(cur_x, cur_y + 1, cur_x, env_bot, rgb_blend(h_col, C_BLACK, 170));
+                cv_line(px, py, cur_x, cur_y, h_col);
+                px = cur_x; py = cur_y;
+            }
+
+            /* Decay */
+            for (i = 1; i <= op_d; i++) {
+                int32_t cur_x = env_x0 + op_a + i;
+                int32_t cur_lvl = op_s + ((op_peak - op_s) * (op_d - i)) / op_d;
+                int32_t cur_y = env_bot - cur_lvl;
+                uint16_t h_col = is_car ? op_col : rgb_blend(RGB(255, 120, 20), op_col, (uint32_t)(cur_lvl * 255 / env_h));
+                if (cur_y < env_bot)
+                    cv_line(cur_x, cur_y + 1, cur_x, env_bot, rgb_blend(h_col, C_BLACK, 180));
+                cv_line(px, py, cur_x, cur_y, h_col);
+                px = cur_x; py = cur_y;
+            }
+
+            /* Sustain */
+            int32_t sus_end = env_x0 + env_w - op_r;
+            int32_t sus_y = env_bot - op_s;
+            for (i = px; i <= sus_end; i++) {
+                if (sus_y < env_bot)
+                    cv_line(i, sus_y + 1, i, env_bot, rgb_blend(op_col, C_BLACK, 200));
+            }
+            cv_line(px, py, sus_end, sus_y, op_col);
+            px = sus_end; py = sus_y;
+
+            /* Release */
+            for (i = 1; i <= op_r; i++) {
+                int32_t cur_x = sus_end + i;
+                int32_t cur_lvl = (op_s * (op_r - i)) / op_r;
+                int32_t cur_y = env_bot - cur_lvl;
+                if (cur_y < env_bot)
+                    cv_line(cur_x, cur_y + 1, cur_x, env_bot, rgb_blend(op_col, C_BLACK, 210));
+                cv_line(px, py, cur_x, cur_y, op_col);
+                px = cur_x; py = cur_y;
+            }
+
+            /* Live note tracer dot */
+            for (i = 0; i < NVOICE; i++) {
+                const voice_t *v = &t->v[i];
+                if (v->active && v->gate && v->stage <= 2) {
+                    int32_t tx = env_x0 + op_a;
+                    int32_t ty = env_bot - (v->env >> 14) * env_h / 1000;
+                    ty = clamp(ty, env_top, env_bot);
+                    cv_rect(tx - 1, ty - 1, 3, 3, C_WHITE);
+                }
+            }
+        }
+
+        /* Routing Destination Footer */
+        if (is_car) {
+            cv_text(cx + 6, 78, &FONT_S, "OUT v", op_col);
+            cv_line(cx + 28, 93, cx + 28, 97, op_col);
+            cv_rect(cx + 27, 96, 3, 2, op_col);
+        } else {
+            uint32_t dest = 1;
+            /* find which operator this modulates */
+            for (uint32_t d = 0; d < 4u; d++) {
+                if ((FM4_MOD[alg] >> (4u * d)) & (1u << k))
+                    dest = d + 1u;
+            }
+            char dest_str[8] = {'>', 'O', 'P', (char)('0' + dest), 0};
+            cv_text(cx + 6, 78, &FONT_S, dest_str, op_col);
+        }
+    }
+
+    /* Continuous Audio Output Bus at Bottom */
+    cv_line(2, 97, 238, 97, C_LINE);
+}
+
+/* Dispatch functions for EDIT 1 and EDIT 2 */
+static void graph_digital_alg(const track_t *t, uint16_t c)
+{
+    graph_digital_floyd_ui(t, c, 0);
+}
+
+static void graph_digital_timbre(const track_t *t, uint16_t c)
+{
+    graph_digital_floyd_ui(t, c, 1);
+}
+
 static void graph_lfo(const track_t *t, uint16_t c)
 {
     int32_t x, py = 50;
@@ -373,6 +553,13 @@ static uint32_t graph_signature(void)
         if (pg->graph == GR_ROLL && ph / 16u != ui.bank)
             ph = 0xFFFFu;                            /* the roll shows the cursor's bank only */
         h ^= steps_hash(t) + ph * 31u + ui.cursor * 7919u;
+    }
+    if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL) {
+        uint32_t v_active = 0;
+        for (i = 0; i < NVOICE; i++)
+            if (t->v[i].active && t->v[i].gate)
+                v_active |= (1u << i) | ((t->v[i].env >> 16) << (4u + i * 4u));
+        h ^= v_active + (ui.frame / 2u) * (v_active != 0);
     }
     return h;
 }
@@ -650,6 +837,11 @@ static void draw_graph(void)
         static const char *const L[2] = {"DRUM TRACK", "SEQ  TRACKS  GLO DRUMS"};
         cv_text((240 - text_w(&FONT_S, L[0])) / 2, 26, &FONT_S, L[0], C_HI);
         cv_text((240 - text_w(&FONT_S, L[1])) / 2, 52, &FONT_S, L[1], C_DIM);
+    } else if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_DIGITAL) {
+        if (pg->id[0] == P_E0)
+            graph_digital_alg(t, c);
+        else if (pg->id[0] == P_E4)
+            graph_digital_timbre(t, c);
     } else {
         switch (pg->graph) {
         case GR_ADSR:
