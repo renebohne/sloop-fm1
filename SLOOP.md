@@ -1,12 +1,25 @@
 <p align="center"><img src="assets/logo/sloop-logo.png" alt="SLOOP" width="480"></p>
 
-# SLOOP 2.2
+# SLOOP 2.3
 
 **A live groovebox firmware for the M-VAVE FM-1 — for any style.** Four tracks — three synths and a drum machine with 16 sounds on the white keys — nine synthesis engines, 68 sounds, 37 drum kits (808, 909, trap, phonk, house, techno, UK garage, jungle, amapiano, reggaeton, synthwave, chiptune, ambient, jazz…), your own samples, ghost notes and ratchets, note repeat, one-key chords, 16 punch-in effects, a vinyl / sidechain / DJ-filter master, and a teenage-engineering-style screen that always shows what your hands can do next. No factory patterns, nothing to load: everything you hear, you play.
 
 SLOOP is free and open source (GPL-3.0), based on [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita / Hügelton Instruments.
 
-> **Status:** 2.2, running on the FM-1. Still a beta: install at your own risk, and please report what you find (GitHub issues).
+> **Status:** 2.3, running on the FM-1. Still a beta: install at your own risk, and please report what you find (GitHub issues).
+
+### New in 2.3
+
+- **A MIDI keyboard on the MIDI IN jack.** The FM-1's 3.5 mm TRS MIDI input works: channels 1–3 play the synth tracks, 10 the drums, 4–16 the selected track. The input reads its buffer by content, so no note is left hanging (fix from Felucca [Salt], by ChanceTheMaker and keremimo). See [MIDI keyboards](#midi-keyboards).
+- **MIDI clock in.** GLO → SYSTEM → **SYNC**: USB or TRS, a setting of the FM-1 that stays when you load a project. SLOOP follows the master's tempo, START, CONTINUE and STOP, pulse by pulse, so it never drifts (after Felucca 1.0, from contributions by ChanceTheMaker and keremimo). See [MIDI keyboards](#midi-keyboards).
+- **USB audio: record the FM-1 on a computer.** On USB the FM-1 is also an audio input (*Felucca*, 44.1 kHz stereo, no driver): record its master output in your DAW or Audacity, MIDI and the editor still working on the same cable (after Felucca 1.0). HOME menu → **USB AUDIO**: the level follows the MASTER knob, or **FULL**, a fixed full level. See [USB audio](#usb-audio-record-on-a-computer).
+- **Choose how REC records.** On the REC screen: KNOB 1 **mode** — *free* (the free take: the tempo follows you) or *tempo* (record at the tempo you set) — KNOB 2 the **length** (1, 2 or 4 bars), KNOB 3 the **start** — your first note, or a one-bar **count-in** after PLAY. See [Recording](#recording).
+- **Lights for playing in the dark.** Hold HOME → **LIGHTS**: every button glows (LOW, MID, HIGH), so the labels are readable on a black FM-1; the active ones stay at full light. **KEYS**: the C keys, or every white key, glow too. **NOTES**: the notes playing light their keys, on every page and in every layer (by @renebohne). The glow is a short pulse on every scan, as in Felucca 1.0.1: no flicker, and the dim marks read as dim. See [Lights](#lights).
+- **Backup and restore.** The editor saves everything on the FM-1 in one file — the music you are working on, the projects, the user presets, the samples, the settings — and puts it all back. See [The web editor](#the-web-editor).
+- **CHOP: recordings of any length.** A recording longer than a slot (about 7 s) is no longer a dead end: tick the chops you keep, untick the rest, shorten any chop (its length slider, or drag the handle at the bottom of the wave), or press **Fit to slot** to shorten the longest ones just enough. Only the kept chops go to the slot or the WAVs, on consecutive keys. See [The web editor](#the-web-editor).
+- **Back to the official firmware from the installer page**, a backup first: select M-VAVE's FM-1 V15 file and install it (as in Felucca 1.0).
+- **Steadier.** The knobs answer every click: no more dead moments, double clicks or jumps. A note-off sent from a computer is never dropped any more when a lot of MIDI arrives at once (a hanging note), and a malformed MIDI message is ignored. When the processor is overloaded, SLOOP fades out one voice at a time, after two late halves in a row and never the bass or the lead, instead of cutting the oldest note. Keys play about a millisecond sooner. A key let go just after a change of VOICE (POLY, MONO…) no longer leaves its note stuck. The settings, projects and presets are checked more strictly when they are read back from flash. (All after Felucca 1.0.)
+- The installer page shows the right numbers (68 sounds, 37 kits).
 
 ### New in 2.2
 
@@ -54,8 +67,11 @@ SLOOP is free and open source (GPL-3.0), based on [Felucca](https://github.com/h
 15. [Song mode](#song-mode)
 16. [The web editor](#the-web-editor)
 17. [Sound design pages](#sound-design-pages)
-18. [Specifications](#specifications)
-19. [Rescue, going back, credits](#rescue-going-back-credits)
+18. [MIDI keyboards](#midi-keyboards)
+19. [USB audio: record on a computer](#usb-audio-record-on-a-computer)
+20. [Lights](#lights)
+21. [Specifications](#specifications)
+22. [Rescue, going back, credits](#rescue-going-back-credits)
 
 ---
 
@@ -119,7 +135,7 @@ Other controls:
 | **PRESETS** | the selected track's sound, or the drum kit |
 | **SELECT** | tempo (always, even inside a layer) |
 | **OCT− / OCT+** | synth tracks: octave (both: back to 0) · drum track, held: ghost / hard hits |
-| **HOME** | the TRACKS screen · hold: menu (colour, low cut, zoom, calibration, about) · tapped while a layer is held: lock it open |
+| **HOME** | the TRACKS screen · hold: menu (colour, low cut, zoom, lights, keys, notes, USB audio, calibration, about) · tapped while a layer is held: lock it open |
 | **ENV / LFO** | their pages |
 
 ## The drum track
@@ -143,7 +159,17 @@ SLOOP records live and layers every pass on top of the last (overdub). Notes go 
 | --- | --- | --- |
 | **Playing** | records the selected track **at once** | REC again stops recording, the loop plays on |
 | **Stopped, project with notes** | arms (*rec ready*, the REC light blinks) | **your first note starts the loop and is step 1**; PLAY starts it too |
-| **Stopped, empty project** | arms (*rec ready* · *play freely*) | a **free take**: see below |
+| **Stopped, empty project** | arms (*rec ready* · *play freely*) | a **free take** (see below), or MODE *tempo*: as with notes |
+
+**The REC screen sets how it records** (armed, before the first note), with the knobs:
+
+| Knob | Dial | Choices |
+| --- | --- | --- |
+| KNOB 1 | **mode** (empty project only) | **free**: a free take, the tempo follows you · **tempo**: record at the tempo set (SELECT) |
+| KNOB 2 | **length** | the loop of the selected track: **1, 2 or 4 bars** |
+| KNOB 3 | **start** | **note**: your first note starts the loop · **count**: press **PLAY**, one bar of clicks (4, 3, 2, 1 on the screen), then the loop starts recording; notes played before only sound |
+
+MODE and START are settings of the FM-1: they stay as you left them. In a project with notes there is no MODE: it always records at the tempo set (a free take would change the tempo of what is already there). During the count-in, REC cancels it and PLAY goes back to *rec ready*.
 
 **Free take — the loop follows you.** On an empty project there is no tempo yet, so you set it by playing:
 
@@ -236,7 +262,7 @@ Hold **FX**, then hold a white key — the 16 white keys from the lowest F to th
 - **TRACKS** (HOME) — the performance view: tempo, swing, transport, bar.beat; each track with its sound, its steps, the playhead, mute / solo / rec badges and its level. Dials: *swing · level · steps · pan* (KNOB 2 on a muted track unmutes it).
 - **Layers** — while a layer button is held: 16 tiles (the white keys) and the knobs' dials, in the layer's colour.
 - **DRUMS** (EDIT or SEQ tapped on TRACKS with the drum track) — **grid**: the 16 sounds × 16 steps, levels as shades, ratchets as notches; dials *sound · step · hit · level*. **kit**: 16 pads that flash on every hit; dials *kit · level · reverb · pan*. EDIT / SEQ tapped switches grid ↔ kit.
-- **REC READY / FREE TAKE** — while REC is armed, and during a free take: the seconds and the loop it makes.
+- **REC READY / FREE TAKE** — while REC is armed: the tracks, then **mode**, **length** and **start** on KNOB 1–3 (4-3-2-1 during a count-in); during a free take: the seconds and the loop it makes.
 - **Holds** — the ring of REC (clear) while held.
 - **SONG** — the section chain.
 - **Sound pages** (ENV, LFO, FX, SCL, EDIT, ARP, SEQ, GLO, SAVE) — the full synth, colour-coded.
@@ -291,7 +317,7 @@ The kit is saved with projects and song sections. MIDI notes in on the drum chan
 Three slots of about 7.4 s each hold your own sounds, played by a synth track: engine **SAMPLE**, **SET** = USR1 / USR2 / USR3. Load them from the web editor, tab **Samples**:
 
 - **Files:** up to 16 WAV per slot (any rate, mono or stereo). The note each one plays at its own speed is in its name (`KEYS_C4.wav`, C4 = 60).
-- **CHOP:** open or drop a recording (WAV, MP3, AIFF…) and cut it into up to 16 chops, one per key — live with **TAP** (or the space bar) while it plays (*snap to the hit* puts each tap on its attack), **Find hits**, **Grid** or **Equal parts**; then **Send to USR1/2/3**, or **Download WAVs**.
+- **CHOP:** open or drop a recording (WAV, MP3, AIFF…) and cut it into up to 16 chops, one per key — live with **TAP** (or the space bar) while it plays (*snap to the hit* puts each tap on its attack), **Find hits**, **Grid** or **Equal parts**; then keep the chops you want (the box on each chop, **Keep all**, **Keep none**, or **K**), set a chop's length (the slider under the chops, or drag the handle at the bottom of the wave; **Up to the next marker** undoes it) or press **Fit to slot** when they are too long together — a recording of any length works, the slot takes about 7.4 s of chops — then **Send to USR1/2/3**, or **Download WAVs** (the kept chops only, each with its own number).
 
 ## Song mode
 
@@ -312,12 +338,54 @@ Open it from the installer page, or with **`OPEN-EDITOR.bat`** (`http://localhos
 - **Sequencer** — the pattern settings and the steps. On the **drum track**: a grid of the 16 sounds × the steps, with the **kit**. Choose a **level** (GHOST, SOFT, NORM, HARD) and a **roll** (x1–x4), then click: a hit; click it again (same level and roll): cleared; Shift+click: one level louder.
 - **Tracks** — the four channel strips (level, pan, mute; SOLO and REC shown as on the device).
 - **Library**, **Samples** (with CHOP), **Projects**, **Settings** (GLOBAL, **MASTER**: DUST, DUCK, FILT, ROLL; DRUMS).
+- **Backup** (Projects tab): **Save a backup** writes everything on the FM-1 to one file (SLOOP-backup-DATE.json): the music you are working on, the projects 1–4 (the song sections A–D), the 32 user presets, the samples USR1–3 and the settings (colours, calibration, the song order, the lights, SYNC). **Restore from a file** puts it all back — what is on the FM-1 is replaced. A damaged file is refused before anything is written, every object is checked as a load checks it, and each one is written as a save writes it (a cut-off restore never leaves half an object). Stop the song (PLAY) before restoring.
 
-The protocol is documented in [web/EDITOR_PROTOCOL.md](web/EDITOR_PROTOCOL.md) (v5).
+The protocol is documented in [web/EDITOR_PROTOCOL.md](web/EDITOR_PROTOCOL.md) (v6).
 
 ## Sound design pages
 
 The full Felucca engine is underneath: nine synthesis engines (analog, 4-op FM, phase distortion, lo-fi chip, sampler, formant voice, three-oscillator, tonewheel organ, granular), envelopes (with a pitch punch for the 808s), LFO, arpeggiator, scales and chords, glide and voice modes, per-track drive and slicer, chorus / delay / reverb sends (a stereo chorus, a tempo delay, a stereo reverb built as a feedback delay network: dense, no metallic ring), 32 user presets, 4 projects.
+
+## MIDI keyboards
+
+SLOOP takes MIDI from two places at once:
+
+- **The MIDI IN jack** (3.5 mm TRS, on the FM-1): a keyboard or a pad controller with a MIDI output, through a TRS-to-DIN MIDI adapter. If nothing plays, try the other type of adapter (type A / type B).
+- **USB**, from a computer or a phone (a DAW, a MIDI routing app) or a USB MIDI host box. A USB keyboard plugged straight into the FM-1 cannot work: both are USB devices, and a USB link needs a host.
+
+| MIDI channel | Plays |
+| --- | --- |
+| 1, 2, 3 | synth tracks 1, 2, 3 |
+| 10 | the drum track (the nearest of its 16 sounds; GLO → DRUMS → CH changes the channel) |
+| 4–16 | the selected track: set your keyboard to channel 4 and it follows ALGORITHM |
+
+**MIDI clock in:** GLO → SYSTEM → **SYNC** = **USB** or **TRS** (INT: SLOOP's own tempo). START plays from the top, CONTINUE carries on where it stopped, STOP stops; the tempo (BPM) follows the master, and the steps follow its 24 pulses a beat, so SLOOP cannot drift away from it. When the clock stops for half a second, PLAY on the FM-1 plays at its own tempo again. SYNC is a setting of the FM-1: it stays when you load a project.
+
+Bluetooth MIDI is not supported: SLOOP, like Felucca, never switches the radio on.
+
+## USB audio: record on a computer
+
+On USB the FM-1 is also an audio input, named **Felucca**: 44.1 kHz, 16-bit stereo, class compliant, so no driver is needed. In your DAW or in Audacity, choose that input and record: you get the master output, exactly what the headphones play (after DUST, DUCK and FILT; the click and the count-in too, if they are on).
+
+**Its level: HOME menu → USB AUDIO.**
+
+- **MASTER** (default): the recording follows the MASTER knob, as the headphones do. Keep MASTER well up while you record.
+- **FULL**: a fixed level, as with MASTER all the way up, kept from clipping by the output limiter, whatever the knob. MASTER then only sets the headphones: the right choice for an audio interface or a computer input with no level control of its own.
+
+USB AUDIO is a setting of the FM-1: it stays as you left it. MIDI, the web editor and the installer keep working on the same cable while the computer records.
+
+- The first time, the computer sees the FM-1 as a slightly different device (MIDI + audio) and sets it up again; the MIDI port keeps its name.
+- The audio input comes from Felucca 1.0 (Leo Kuroshita): the same code, adapted to SLOOP.
+
+## Lights
+
+Hold **HOME** for the menu: **LIGHTS**, **KEYS** and **NOTES** are together there (with **USB AUDIO**, the level of the USB audio input: see [USB audio](#usb-audio-record-on-a-computer)). PRESETS moves, **KNOB 1** sets, OCT+ steps round, OCT− closes. They are saved with the settings of the FM-1, not with a project: loading a project or NEW PROJECT does not change them.
+
+- **LIGHTS** — OFF, LOW, MID, HIGH: every button glows at that level, so its label can be read in the dark (on a black FM-1 the labels are unreadable unlit). What is on — the page, PLAY, REC, an octave — stays at full light and still blinks as before.
+- **KEYS** — OFF, C KEYS, WHITE KEYS: the Cs, or every white key, glow at the LIGHTS level too (KEYS turns LIGHTS on at LOW if it was off). Played keys and the layer landmarks keep their own light.
+- **NOTES** — ON: on a synth track, the notes sounding light their keys, played live or by the sequencer (the drum track always does). By @renebohne. It works on every page and in every layer: where the keys play or erase notes (EDIT, ARP, SAVE, SCL) the notes are lit — in SCL the scale and on the drum track in EDIT the sounds of the pattern then glow dimly underneath; where the keys are tiles (FX effects, SEQ steps, GLO mute / solo) the notes glow dimly and the tiles keep their full light.
+
+The glow is a short pulse on every scan of the panel (about 900 times a second): no flicker. LOW, MID and HIGH are 0.5, 1 and 2 µs a scan; the landmarks (keys 1, 5, 9, 13 while a layer is held) and the notes under the tiles glow at 4 µs, a lit LED is about 95 µs.
 
 ## Specifications
 
@@ -329,16 +397,16 @@ The full Felucca engine is underneath: nine synthesis engines (analog, 4-op FM, 
 | Performance | layers (hold a button: keys and knobs change job): punch-in FX, erase, note repeat, step entry, key / chords, mute / solo / tap tempo |
 | Drum kits | 37 (5 sampled, 32 synthesised, 16 sounds each) |
 | Effects | 16 punch-in effects; master DUST, DUCK, DJ filter; per track drive, slicer, sends to a stereo chorus, a tempo delay and a stereo reverb; master limiter |
-| Recording | live, quantised as heard (latency-compensated), overdub; records at once while playing; free take sets loop length and tempo |
+| Recording | live, quantised as heard (latency-compensated), overdub; records at once while playing; free take sets loop length and tempo, or the tempo set, from the first note or a one-bar count-in |
 | Memory | undo / redo, 4 projects, 32 user presets, autosave of the working project, song of 4 sections × 16 steps × 1–64 bars |
-| Audio | 44.1 kHz, fixed-point DSP |
-| MIDI | USB class-compliant in / out; channels 1–3 the synths, 10 the drums |
+| Audio | 44.1 kHz, fixed-point DSP; USB audio input (the master output, 16-bit stereo, class compliant) |
+| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm jack); channels 1–3 the synths, 10 the drums, 4–16 the selected track; MIDI clock in (USB or TRS) |
 | Update | over USB from the browser (package SHA-256 and CRC checked) |
 
 ## Rescue, going back, credits
 
 - **USB rescue:** hold **OCT−** alone while switching on (*SLOOP USB RESCUE*), then install again.
 - **Interrupted install:** the FM-1 stays in update mode; press Install again and it finishes. A damaged package is refused, and the FM-1 keeps waiting for a good one.
-- **Back to the official firmware:** M-VAVE's updater, M-UPGRADE, and the FM-1 firmware from m-vave.com.
-- **Credits:** SLOOP is based on Felucca by Leo Kuroshita (@kurogedelic), Hügelton Instruments — engines, sequencer, editor and installer. Font: Terminus (SIL OFL 1.1). Samples: Versilian Studios VSCO-2 CE and VCSL, Sonic Pi (all CC0). PHASE: CrispyZebra (GPL). VOICE after klattsch (MIT). Interface ideas after teenage engineering's pocket operators and EP-133, Elektron's step entry and Akai's MPC (swing, note repeat, erase) — SLOOP is not affiliated with any of them.
+- **Back to the official firmware:** on the installer page, open **Return to the official firmware (V15)**: save a backup with the editor first, download FM-1 V15 from m-vave.com, select its FM-1.fwsc (only that exact file is accepted) and install it. M-VAVE's own updater, M-UPGRADE, works too (close every other app that uses MIDI first). To come back to SLOOP, install it again and restore your backup.
+- **Credits:** SLOOP is based on Felucca by Leo Kuroshita (@kurogedelic), Hügelton Instruments — engines, sequencer, editor and installer. Played-note key lights: @renebohne (pull request #11). TRS MIDI input buffer fix: Felucca [Salt] by ChanceTheMaker, found by keremimo. Knob reading, MIDI input, overload shedding, LED glow, key debounce, MIDI clock, the USB audio input and the return to the official firmware after Felucca 1.0 / 1.0.1. Font: Terminus (SIL OFL 1.1). Samples: Versilian Studios VSCO-2 CE and VCSL, Sonic Pi (all CC0). PHASE: CrispyZebra (GPL). VOICE after klattsch (MIT). Interface ideas after teenage engineering's pocket operators and EP-133, Elektron's step entry and Akai's MPC (swing, note repeat, erase) — SLOOP is not affiliated with any of them.
 - **Licence:** GPL-3.0, no warranty. M-VAVE and FM-1 are trademarks of their owners; SLOOP is not affiliated with them. Drum kit names describe styles; they do not refer to any product.

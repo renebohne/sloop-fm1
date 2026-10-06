@@ -14,5 +14,5 @@ drawbar_block 102
 grain_render 1734
 grain_block 138
 slicer_track 825
-drums_mix 6584
-fm1_alnk0_irq 174
+drums_mix 6634
+fm1_alnk0_irq 255

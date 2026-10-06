@@ -31,9 +31,10 @@ const html = readFileSync(join(HERE, "editor.html"), "utf8");
 const proto = html.slice(html.indexOf("/*PROTO-BEGIN*/"), html.indexOf("/*PROTO-END*/"));
 const E = vm.runInNewContext(proto + `
 ;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, rootFromName, buildSlot, makeMockDevice, CMD, SMP,
-   CHOP, chopNovelty, chopHits, chopSnap, chopGrid, chopEqual, chopList, chopZones, wavFile, zipStore, crc32,
+   CHOP, chopNovelty, chopHits, chopSnap, chopGrid, chopEqual, chopList, chopPick, chopFit, chopZones, wavFile, zipStore, crc32,
    UP, bank, capturePatch, auditionPatch, startWatch, libraryFile, readLibraryFile, paramKeys, patternFromSteps, stepsFromPattern, upName,
-   mixer, GM_DRUM, drumName, parseNotes, fmtValue, F, DRUM_LANES, LV_NAMES, emptyDrum })`,
+   mixer, GM_DRUM, drumName, parseNotes, fmtValue, F, DRUM_LANES, LV_NAMES, emptyDrum,
+   backupCapture, backupRestore, backupObjects, b64enc, b64dec })`,
 { setTimeout, clearTimeout, setInterval, clearInterval, console, TextEncoder });
 
 async function editorMock() {
@@ -437,18 +438,57 @@ async function editorTrackParam() {
   o.done();
 }
 
+/* ------------------------------------- editor v6: backup / restore --- */
+async function editorBackup() {
+  const C = E.CMD;
+  const { rq, done } = attachMock({});
+  const info = E.parse[C.INFO](await rq(E.req.info()));
+  ok(info.proto === 6, "backup: INFO protocol v6");
+  const ec = readFileSync(join(HERE, "../firmware/src/editor.c"), "utf8");
+  ok(/ED_BK_IDS\[\] = \{0, 1, 2, 3, 4, 5, 6, 7, 32, 33, 34\}/.test(ec), "backup: the object ids == editor.c ED_BK_IDS");
+  await rq(E.req.upStore(3, "BACKUP ME"));
+  await rq(E.req.project(1, 2), { timeout: 4000, retries: 0 });
+  const s = Int16Array.from({ length: 3000 }, (_, i) => Math.round(8000 * Math.sin(i / 7)));
+  const { hdr, data } = E.buildSlot("test", [{ s, root: 60 }]);
+  await rq(E.req.smpBegin(1), { timeout: 1000, retries: 0 });
+  for (let off = 0; off < data.length; off += 256) await rq(E.req.smpWrite(1, E.SMP.DATA_OFF + off, data.subarray(off, off + 256)), { timeout: 1000 });
+  await rq(E.req.smpEnd(1, hdr), { timeout: 2000, retries: 0 });
+  const A = await E.backupCapture(rq, info);
+  const obj = (id) => A.objects.find((o) => o.id === id);
+  ok(A.format === "sloop-backup" && A.objects.map((o) => o.id).join() === "0,1,2,3,4,5,6,7,32,33,34" && obj(33).len > 512
+    && obj(4).len > 0 && obj(3).len === 0 && obj(32).len === 0, "backup: LIST + GET: 11 objects (project in C, sample in USR2, B empty)");
+  await rq(E.req.upErase(3));
+  await rq(E.req.smpErase(1), { timeout: 2500, retries: 0 });
+  await rq(E.req.set(0, 3, 5));
+  await rq(E.req.project(1, 1), { timeout: 4000, retries: 0 });
+  await E.backupRestore(rq, JSON.parse(JSON.stringify(A)));   /* as written to disk and read back */
+  const B = await E.backupCapture(rq, info);
+  ok(js(B.objects) === js(A.objects), "backup: restore -> the same bytes again (presets, projects, samples, settings)");
+  const bad = JSON.parse(JSON.stringify(A));
+  bad.objects[2].data = E.b64enc(E.b64dec(bad.objects[2].data).map((x, i) => i === 3 ? x ^ 1 : x));
+  let caught = "";
+  try { E.backupObjects(bad); } catch (e) { caught = e.code; }
+  ok(caught === "bkBad", "backup: a damaged file is refused before anything is written");
+  done();
+  const old = attachMock({ noBackup: true });
+  const oi = E.parse[C.INFO](await old.rq(E.req.info()));
+  ok(oi.proto === 5, "backup: firmware without it says protocol 5 (the editor hides backup)");
+  old.done();
+}
+
 /* ------------------------------------- editor v5 (SLOOP 2.0): lanes, levels, ratchets --- */
 async function editorV5() {
   const C = E.CMD;
   const { m, rq, ev, done } = attachMock({ watchMs: 1000 });
   const info = E.parse[C.INFO](await rq(E.req.info()));
-  ok(info.proto === 5 && /SLOOP/.test(info.version) && info.pcount === 58 && info.gcount === 32 && info.pe0 === 50, "v5: INFO ends with the protocol version 5");
+  ok(info.proto === 6 && /SLOOP/.test(info.version) && info.pcount === 58 && info.gcount === 32 && info.pe0 === 50, "v5/v6: INFO ends with the protocol version (6: backup)");
   /* the firmware says the same: ED_DRUM_STEP is command 33, INFO sends 5, P_CHORD / the master globals as the mock has them */
   const ec = readFileSync(join(HERE, "../firmware/src/editor.c"), "utf8"), pc = readFileSync(join(HERE, "../firmware/src/params.c"), "utf8");
   const en = (/enum \{ ED_INFO = 1,([^}]*)\}/.exec(ec) || [])[1] || "";
   const names = ["ED_INFO", ...en.replace(/\/\*[^*]*\*\//g, "").split(",").map((x) => x.trim()).filter(Boolean)];
   ok(names.indexOf("ED_DRUM_STEP") + 1 === C.DRUM_STEP && names.indexOf("ED_TRACK_CHANGED") + 1 === C.TRACK_CHANGED
-    && /ed_b\(5\);\s*\/\* v5: the protocol version/.test(ec), "v5: command numbers and INFO == editor.c");
+    && names.indexOf("ED_BK_LIST") + 1 === C.BK_LIST && names.indexOf("ED_BK_PUT") + 1 === C.BK_PUT
+    && /ed_b\(6\);\s*\/\* v6: the protocol version/.test(ec), "v5/v6: command numbers and INFO == editor.c");
   const enumNames = (id) => (new RegExp(`${id}\\[\\] = \\{([^}]*)\\}`).exec(pc) || [])[1].split(",").map((x) => x.trim().replace(/"/g, ""));
   const chord = E.parse[C.DESC](await rq(E.req.desc(0, 49)));
   const gd = [];
@@ -636,6 +676,30 @@ function chopTests() {
 z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None
 print(",".join(i.filename + ":" + str(i.file_size) for i in z.infolist()))`, zp).toString().trim();
   ok(r === zones.slice(0, 3).map((z) => `BREAK/${z.fname}:${44 + z.s.length * 2}`).join(), "chop: ZIP of the WAVs (Python reads it)");
+
+  /* keep / leave out, own lengths, fit: a recording longer than a slot */
+  const opt = [null, { off: true }, { len: 30 }];
+  const kl = E.chopList([10, 50, 400], 1000, 100, opt);
+  ok(kl.map((c) => `${c.start}-${c.end}${c.off ? "x" : ""}/${c.full}`).join() === "10-50/50,50-150x/400,400-430/1000"
+    && E.chopList([10, 400], 1000, 0, [{ len: 9999 }])[0].end === 400,
+    "chop: options (left out, own length over the max, never past the next marker)");
+  const kz = E.chopZones(x, E.chopList(hits, N, 0, [{}, { off: true }, {}, { off: true }]), 60, 0);
+  ok(kz.length === 6 && kz.map((z) => z.root).join() === "60,61,62,63,64,65" && kz[1].fname === "CHOP03_C#4.wav" && kz[2].fname === "CHOP05_D4.wav",
+    "chop: left-out chops: the kept ones on consecutive keys, files keep their numbers");
+  const L = R * 20, long = new Float64Array(L);
+  for (let i = 0; i < L; i++) long[i] = Math.sin(i * 0.05) * 0.5;
+  const marks = E.chopEqual(0, L, 40), room = E.SMP.MAX_DATA * 2;
+  const all = E.chopList(marks, L), pick = E.chopPick(all);
+  ok(pick.length === 16 && pick[15].i === 15 && E.chopPick(all, 1, 7)[0].i === 7, "chop: 40 chops: the first 16 kept go to the slot; mode 1 the selected");
+  const lo = E.chopList(marks, L, 0, marks.map((_, i) => ({ off: i % 4 !== 0 })));   /* keep 10 of 40 (each 0.5 s) */
+  ok(E.chopPick(lo).length === 10 && E.chopFit(E.chopPick(lo), room) === Infinity, "chop: 20 s recording, 10 chops kept: they fit");
+  const many = E.chopPick(E.chopList(marks, L, 0, marks.map((_, i) => ({ off: i >= 16 })))), Lf = E.chopFit(many, room - many.length);
+  const fitted = many.map((c) => ({ ...c, end: Math.min(c.end, c.start + Lf) }));
+  let built = null;
+  try { built = E.buildSlot("LONG", E.chopZones(long, fitted, 60, 0)); } catch (e) { built = null; }
+  ok(Lf < R * 0.5 && Lf > R * 0.4 && built && built.data.length <= E.SMP.MAX_DATA && built.hdr[6] === 16,
+    `chop: Fit to slot: 16 x 0.5 s cut to ${(Lf / R).toFixed(3)} s each, the slot builds`);
+  ok(E.chopFit([{ start: 0, end: 100 }, { start: 0, end: 300 }], 250) === 150, "chop: fit keeps short chops whole, cuts the long ones");
 }
 
 /* ------------------------------------------------------- packages: JS == Python --- */
@@ -746,6 +810,19 @@ async function updater() {
   stock.boot("ota-FM-1_015", "FM-1 Update");
   const e3 = await new Updater(stock.access).resume(image).then(() => null, (x) => x);
   ok(e3 && e3.code === "foreign" && e3.detail === "ota-FM-1_015" && stock.served === 0, "fm1ota.js: another firmware's loader is never resumed ('foreign')");
+  const back = new FakeFM1(image, { finalIdentity: "FM-1_015" });   /* the return to the official V15, interrupted */
+  back.boot("ota-FM-1_015", "FM-1 Update");
+  const st = [];
+  const r4 = await new Updater(back.access).resume(image, (k) => st.push(k), { product: "FM-1_015" });
+  ok(r4 === true && back.bad === 0 && st.at(-1) === "done", "fm1ota.js: return to official: its own loader resumed, V15 checked when back");
+  const wrong = new FakeFM1(image, { finalIdentity: "FM-1_900" });
+  wrong.boot("ota-FM-1_015", "FM-1 Update");
+  const e5 = await new Updater(wrong.access).resume(image, null, { product: "FM-1_015" }).then(() => null, (x) => x);
+  ok(e5 && e5.code === "mismatch", "fm1ota.js: return to official: another firmware coming back is not 'done'");
+  const pk = await import(join(HERE, "fm1pkg.js"));
+  const notStock = new Uint8Array(pk.STOCK_V15_SIZE);
+  const e6 = await pk.validateStockPackage(notStock).then(() => null, (x) => x);
+  ok(e6 && /official FM-1 V15/.test(e6.message), "fm1pkg.js: only the exact official V15 is accepted (SHA-256)");
 }
 
 await editorMock();
@@ -755,6 +832,7 @@ await editorTracks();
 await editorMixer();
 await editorTrackParam();
 await editorV5();
+await editorBackup();
 editorTabs();
 editorIcons();
 samplesMatch();
