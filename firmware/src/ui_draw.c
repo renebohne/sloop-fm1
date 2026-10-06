@@ -429,7 +429,7 @@ static void graph_floyd(const track_t *t, uint16_t c)
     } else if (pg->scope == SC_FLOYD && pg->title[0] == 'L') {
         cv_text(4, 0, &FONT_S, "LEVEL: OP1..OP4 DEPTHS", C_WHITE);
     } else if (pg->scope == SC_FLOYD && pg->title[0] == 'R') {
-        cv_text(4, 0, &FONT_S, "RATIO: FDBK & RATIOS", C_WHITE);
+        cv_text(4, 0, &FONT_S, "RATIO: MULTIPLIERS & FB", C_WHITE);
     } else {
         cv_text(4, 0, &FONT_S, ALG_ROUTING[alg], hot == P_E0 ? C_WHITE : C_HI);
     }
@@ -452,16 +452,6 @@ static void graph_floyd(const track_t *t, uint16_t c)
         else if (hot == P_E2 || hot == P_E6) active_op = 2;
         else if (hot == P_E3 || hot == P_E7) active_op = 3;
         else if (hot == P_ATK || hot == P_DEC || hot == P_SUS || hot == P_REL) active_op = 0;
-    }
-
-    /* Top Operator Badges: OP1 OP2 OP3 OP4 */
-    for (uint32_t k = 0; k < 4u; k++) {
-        int32_t bx = 144 + (int32_t)k * 24;
-        int is_act = (active_op == (int32_t)k);
-        char b_txt[4] = {'O', 'P', '1' + (char)k, 0};
-        cv_rect(bx, 1, 22, 10, is_act ? C_WHITE : TE_G2);
-        cv_rect(bx + 1, 2, 20, 8, is_act ? OP_COLS[k] : C_BLACK);
-        cv_text(bx + 3, 2, &FONT_S, b_txt + 2, is_act ? C_WHITE : OP_COLS[k]);
     }
 
     /* Separator line below header */
