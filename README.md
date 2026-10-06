@@ -347,7 +347,7 @@ See [BUILDING.md](BUILDING.md). In short: the JieLi toolchain and three files of
 - **@renebohne** — the played-note key lights (pull request #11).
 - **ChanceTheMaker** and **keremimo** — the TRS MIDI input fix (Felucca Salt) and contributions to the MIDI clock.
 - **Everyone who installed SLOOP, made music with it, commented, reported a bug or asked for a feature** — most of 2.3 comes from your messages.
-- Samples: Versilian Studios VSCO-2 CE and VCSL, Sonic Pi (all CC0). Font: Terminus (SIL OFL 1.1). Icons: Fukiai (MIT, Hügelton Instruments). PHASE engine after CrispyZebra (GPL); VOICE after klattsch (MIT).
+- Samples: Versilian Studios VSCO-2 CE and VCSL, Sonic Pi (all CC0). Font: Terminus (SIL OFL 1.1). Icons: Fukiai (MIT, Hügelton Instruments). PHASE engine after CrispyZebra (GPL); VOICE after klattsch (MIT). FLOYD engine after Floyd Steinberg's 4-OP FM concept and Jonathan Zeppa's FloydFM (MIT).
 - Interface ideas after teenage engineering's pocket operators and EP-133, Elektron's step entry and Akai's MPC (swing, note repeat, erase).
 
 ## Licence
