@@ -2,6 +2,8 @@
 
 The **FLOYD** engine is an advanced 4-operator FM (Frequency Modulation) synthesizer engineered for the SLOOP firmware on the M-VAVE FM-1 hardware. It pairs deep per-operator dynamic modulation controls with an intuitive 7-page vector UI and real-time oscilloscope visualization.
 
+![Floyd 4-Operator FM Screens](assets/screens/floyd-screens.png)
+
 ---
 
 ## 1. Heritage, Inspiration & Credits
