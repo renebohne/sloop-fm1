@@ -54,6 +54,7 @@
 #include "audio.c"
 #include "panel.c"
 #include "ui.c"
+#include "ccmap.c"           /* MIDI CC: the write flags the UI, so it comes after ui.c */
 #include "ui_song.c"
 #include "ui_studio.c"
 #include "icons.c"           /* parameter icons (FELUCCA_ICONS), used by ui_draw.c */

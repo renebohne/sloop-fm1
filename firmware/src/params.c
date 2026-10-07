@@ -139,6 +139,9 @@ static const param_desc_t GP[G_COUNT] = {
 };
 
 static const param_desc_t DRUM_KIT_DESC = PE("KIT", DRUM_KIT_NAMES, 0);
+/* the drum track's four HOME knobs: LEVEL and REV are global (GLO > DRUMS), PAN and LEN its own.
+ * Shared with the MIDI CC map (ccmap.c CC_HOME), so both agree on what the drum knobs are. */
+static const uint8_t CC_DRUM_HOME[4][2] = {{1, G_DRLVL}, {1, G_DRREV}, {0, P_PAN}, {0, P_SLEN}};
 static const param_desc_t *track_desc(const track_t *t, uint32_t id)
 {
     if(is_drum(t) && id==P_E0) return &DRUM_KIT_DESC;
