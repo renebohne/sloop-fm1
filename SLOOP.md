@@ -361,27 +361,9 @@ SLOOP takes MIDI from two places at once:
 
 **MIDI clock in:** GLO → SYSTEM → **SYNC** = **USB** or **TRS** (INT: SLOOP's own tempo). START plays from the top, CONTINUE carries on where it stopped, STOP stops; the tempo (BPM) follows the master, and the steps follow its 24 pulses a beat, so SLOOP cannot drift away from it. When the clock stops for half a second, PLAY on the FM-1 plays at its own tempo again. SYNC is a setting of the FM-1: it stays when you load a project.
 
-**Program change:** a PC on a track's channel loads that track's preset, and on the drum channel a drum kit (0 is the first of each). It is what the PRESETS knob does, from your controller.
+**Program change:** a PC on a track's channel loads that track's preset, and on the drum channel a drum kit (0 is the first of each). It is what the PRESETS knob does, from your controller, and changes only the sound: the pattern and the mix stay as they are. See [MIDI-MAP.md](MIDI-MAP.md).
 
-**Control change (CC):** an external controller's knobs reach the parameters. The MIDI channel picks the track, the same way notes do, so your controller's channel decides which part it moves; the CC number picks the parameter, and it is the same number whatever page the FM-1 happens to be showing.
-
-| CC | Moves | CC | Moves |
-| --- | --- | --- | --- |
-| 7 | LEVEL | 10 | PAN |
-| 16 / 17 | HOME knob 1 / 2 | 18 / 19 | HOME knob 3 / 4 |
-| 20 / 21 | ATK / DEC | 22 / 23 | SUS / REL |
-| 24 / 25 | ENV DEST FLT / PIT | 26 | ENV DEST SHP |
-| 27 / 28 | LFO RATE / WAVE | 29 / 30 | LFO PHS / FADE |
-| 31 / 32 | LFO DEST PIT / FLT | 33 / 34 | LFO DEST SHP / AMP |
-| 35 / 36 | DIST / CHOR | 37 / 38 | DLY / REV |
-| 39 / 40 | SLICER SLCR / SLPAT | 41 / 42 | SLICER RATE / DEPTH |
-| 43–50 | EDIT 1 and EDIT 2: the engine's own knobs 1–8 | | |
-| 51 / 52 | VOICE / GLIDE | 53 / 54 | GLIDE MODE / PRIO |
-| 55 / 56 | ALLOC / DETUNE | 57 / 58 | PAN / MUTE |
-
-The four HOME knobs are the engine's own (on POLY, its LEV, ALG, RATIO and FEED, say), so CC 16–19 always move the four that the HOME page of that engine shows. On the drum channel they are the drum's LEVEL, REVERB, PAN and SLICE LEN, and only CC 7, 10, 16–19 and 39–42 do anything there.
-
-A CC value is absolute over the parameter's own range: 0 is its minimum, 127 its maximum, and a parameter with a fixed list of positions lands on one of them. A controller that sends 14-bit values in two CCs (pitch bend style) moves nothing; it has to send plain 7-bit ones.
+**Control change (CC):** an external controller's knobs reach the parameters. The MIDI channel picks the track, the same way notes do, so your controller's channel decides which part it moves; the CC number picks the parameter, and it is the same number whatever page the FM-1 happens to be showing: 7 LEVEL, 10 PAN, 16–19 the four HOME knobs, 20–26 the envelope, 27–34 the LFO, 35–38 the effects, 39–42 the slicer, 43–58 the engine's EDIT and VOICE knobs. On the drum channel only 7, 10, 16–19 and 39–42 do anything. A CC value is absolute over the parameter's own range: 0 is its minimum, 127 its maximum. Neither message is sent back to the controller. The full tables are in [MIDI-MAP.md](MIDI-MAP.md).
 
 Bluetooth MIDI is not supported: SLOOP, like Felucca, never switches the radio on.
 
@@ -422,7 +404,7 @@ The glow is a short pulse on every scan of the panel (about 900 times a second):
 | Recording | live, quantised as heard (latency-compensated), overdub; records at once while playing; free take sets loop length and tempo, or the tempo set, from the first note or a one-bar count-in |
 | Memory | undo / redo, 4 projects, 32 user presets, autosave of the working project, song of 4 sections × 16 steps × 1–64 bars |
 | Audio | 44.1 kHz, fixed-point DSP; USB audio input (the master output, 16-bit stereo, class compliant) |
-| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm jack); channels 1–3 the synths, 10 the drums, 4–16 the selected track; program change selects a preset or kit; 45 control changes for the knobs (see [MIDI keyboards](#midi-keyboards)); MIDI clock in (USB or TRS) |
+| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm jack); channels 1–3 the synths, 10 the drums, 4–16 the selected track; program change selects a preset or kit; 45 control changes for the knobs ([MIDI-MAP.md](MIDI-MAP.md)); MIDI clock in (USB or TRS) |
 | Update | over USB from the browser (package SHA-256 and CRC checked) |
 
 ## Rescue, going back, credits

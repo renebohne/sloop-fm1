@@ -317,13 +317,14 @@ Something else? [Open an issue](../../issues): what you did, what you expected, 
 | Effects | 16 punch-in effects; master DUST, DUCK, DJ filter, limiter; per track drive, slicer, sends to a stereo chorus, a tempo delay and a stereo reverb |
 | Memory | autosave, undo / redo, 4 projects, 32 user presets, song of 4 sections × 16 steps × 1–64 bars, full backup / restore (editor) |
 | Audio | 44.1 kHz, fixed-point DSP; USB audio input (the master output, 16-bit stereo, class compliant) |
-| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm); MIDI clock in (USB or TRS) |
+| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm); program change selects a preset or kit; 45 control changes for the knobs ([MIDI-MAP.md](MIDI-MAP.md)); MIDI clock in (USB or TRS) |
 | Lights | button backlight (3 levels), C keys / white keys, played notes |
 | Update | over USB from the browser (SHA-256 and CRC checked), USB rescue, return to the official V15 |
 
 ## Documentation
 
 - [SLOOP.md](SLOOP.md) — the full manual (every page, layer, sound and kit)
+- [MIDI-MAP.md](MIDI-MAP.md) — program change and control change: the tables, for external controllers
 - [DEMARRAGE-RAPIDE-FR.md](DEMARRAGE-RAPIDE-FR.md) — guide de démarrage en français
 - [BUILDING.md](BUILDING.md) — building, build options and tests
 - [web/EDITOR_PROTOCOL.md](web/EDITOR_PROTOCOL.md) — the editor's SysEx protocol
