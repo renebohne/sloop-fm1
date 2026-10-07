@@ -16,6 +16,7 @@
  *   DRUMS   the grid: sound / step / hit / level knobs, GRID <-> KIT
  * then 20000 frames of random use: every draw stays on the screen. */
 #define FELUCCA_ARRANGER 1
+#define MIDI_PC_IN_UI 1                 /* ui.c below has the real midi_pc: not hostsim's stub */
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -60,11 +61,26 @@ static void song_restore(void) {}
 static uint32_t sec_stores, sec_loads;
 static void section_store(uint32_t s) { sec_stores++; live_sec = (int8_t)s; }
 static void section_load(uint32_t s) { sec_loads++; live_sec = (int8_t)s; }
-static int up_used(uint32_t k) { return k < 2; }
-static int up_load(uint32_t k) { (void)k; return 0; }
-static uint32_t up_count(void) { return 2; }
-static uint32_t up_nth(uint32_t n) { return n; }
-static uint32_t up_rank(uint32_t s) { return s; }
+/* the user preset layer (upreset.c is not in this harness): a slot map, so the PC tests can
+ * write slots and see them loaded. Slots 0 and 1 start used, as the page expects. */
+static uint8_t up_map[UP_SLOTS];
+static uint8_t up_loaded;                             /* the slot up_load_to last loaded + 1 */
+static int up_used(uint32_t k) { return k < UP_SLOTS && up_map[k]; }
+static int up_load_to(track_t *t, uint32_t k)
+{
+    if (!up_used(k) || is_drum(t))
+        return 1;
+    t->eng_req = 1;                                   /* a fixed engine: the test checks the load */
+    t->preset = 0;
+    t->user = (uint8_t)(k + 1u);
+    up_loaded = (uint8_t)(k + 1u);
+    return 0;
+}
+static int up_load(uint32_t k) { return up_load_to(TSEL, k); }
+static uint32_t up_count(void) { uint32_t n = 0, k; for (k = 0; k < UP_SLOTS; k++) n += up_used(k); return n; }
+static uint32_t up_nth(uint32_t n) { uint32_t k; for (k = 0; k < UP_SLOTS; k++) if (up_used(k) && !n--) return k; return 0; }
+static uint32_t up_rank(uint32_t s) { uint32_t n = 0, k; for (k = 0; k < s && k < UP_SLOTS; k++) n += up_used(k); return n; }
+static void up_init(void) { up_map[0] = up_map[1] = 1; up_loaded = 0; }
 static void up_name(uint32_t k, char *b) { str_cpy(b, k ? "MY PAD" : "MY LEAD", 13); }
 static void up_slot_label(char *b, uint32_t k) { fmt_int(b, (int32_t)k + 1); }
 static void up_ui(uint32_t op, uint32_t k) { (void)op; (void)k; }
@@ -101,6 +117,116 @@ static void key(uint32_t k) { fm1_in.notes |= 1u << k; frame(); fm1_in.notes &= 
 static int fails;
 static void check(int ok, const char *what) { printf("ui: %-74s %s\n", what, ok ? "ok" : "FAIL"); fails += !ok; }
 
+/* a PC message on channel ch, as seq.c reads it out of midi_in_q: status 0xC0 | ch, 2 bytes */
+static uint32_t pc_pkt(uint32_t ch, uint32_t prog) { return 0xCu | (0xC0u | ch) << 8 | prog << 16; }
+static void pc(uint32_t ch, uint32_t prog)
+{
+    midi_in_q[mi_w % MQ] = pc_pkt(ch, prog);
+    mi_w++;
+    events_block(CTL);                                /* the MIDI loop runs there */
+}
+/* MIDI program change: what the PRESETS knob does, addressed by channel */
+static void midi_pc_tests(void)
+{
+    uint32_t ch, prog, bad, bad_engine;
+    bank_resolve();
+    printf("midi PC: channel 1-3 select a preset (0..%u), %u..%u the user slots; "
+           "the drum channel 0..%u the kits\n", NBANK - 1u, NBANK, NBANK + UP_SLOTS - 1u, DRUM_KITS - 1u);
+    /* every factory preset lands on the right engine and the right index */
+    bad = bad_engine = 0;
+    for (prog = 0; prog < NBANK; prog++) {
+        uint8_t want_e = BANK[prog].e, want_k = bank_pi[prog];
+        track_select(0);
+        pc(0, prog);
+        if (trk[0].eng_req != want_e) bad_engine++;
+        else if (want_k != 0xFF && trk[0].preset != want_k) bad++;
+        else if (want_k == 0xFF && trk[0].preset % ENGINES[want_e]->npresets != 0) bad++;
+    }
+    check(!bad_engine, "PC 0..NBANK-1 selects each entry's own engine");
+    check(!bad, "PC 0..NBANK-1 selects each entry's own preset");
+    /* a channel of its own: each part has one, and PC reaches that part, not the selection */
+    for (ch = 0; ch < NPART; ch++) {
+        uint8_t want_e = BANK[1].e, want_k = bank_pi[1] == 0xFF ? 0 : bank_pi[1];
+        track_select(3);                              /* a different track selected */
+        pc(ch, 1);                                    /* BANK[1]: not where any part starts */
+        check(trk[ch].eng_req == want_e && trk[ch].preset == want_k,
+              "PC on a part's channel reaches that part, not the selection");
+    }
+    /* and the selected track is left alone while a part's own channel is addressed */
+    host_tracks_init();
+    up_init();
+    track_select(2);
+    pc(0, 5);                                         /* part 1's channel */
+    check(trk[2].user == 0 && trk[2].eng_req == 0 && trk[2].preset == 1,
+          "PC on channel 1 leaves track 3 (selected) alone");
+    /* a channel that is nobody's acts on the selected track */
+    track_select(1);
+    pc(5, 0);                                         /* not a part, not the drum channel */
+    check(trk[1].eng_req == BANK[0].e && trk[1].preset == (bank_pi[0] == 0xFF ? 0 : bank_pi[0]),
+          "PC on an unassigned channel follows the selected track");
+    /* out of range: ignored, as the knob's clamp would leave it */
+    {
+        uint8_t e0 = trk[1].eng_req, p0 = trk[1].preset, u0 = trk[1].user;
+        track_select(1);
+        pc(0, NBANK + UP_SLOTS);
+        pc(0, 127);
+        check(trk[1].eng_req == e0 && trk[1].preset == p0 && trk[1].user == u0,
+              "PC past the last slot is ignored");
+    }
+    /* user slots by number; empty ones leave the track alone */
+    host_tracks_init();
+    up_init();
+    track_select(0);
+    check(up_used(0) && up_used(1) && !up_used(4), "two user slots used, the rest empty");
+    trk[0].user = 0;
+    trk[0].eng_req = 0;
+    pc(0, NBANK);                                     /* slot 0, written */
+    check(up_loaded == 1 && trk[0].user == 1, "PC NBANK loads user slot 0");
+    check(trk[0].eng_req == 1, "a user preset brings its engine");
+    trk[0].eng_req = 5;
+    trk[0].user = 0;
+    pc(0, NBANK + 1);                                 /* slot 1, written */
+    check(up_loaded == 2 && trk[0].user == 2, "PC NBANK+1 loads user slot 1");
+    trk[0].eng_req = 5;
+    trk[0].user = 0;
+    pc(0, NBANK + 4);                                 /* slot 4, empty */
+    check(trk[0].user == 0 && trk[0].eng_req == 5, "PC to an empty slot leaves the track alone");
+    {   /* the numbering is the slot, not its rank among the used ones */
+        up_map[5] = 1;                                /* slot 5 written: now the 3rd used one */
+        up_loaded = 0;
+        pc(0, NBANK + 5);
+        check(up_loaded == 6 && trk[0].user == 6, "PC NBANK+5 loads slot 5, not the 3rd used");
+    }
+    /* the drum channel: a kit index */
+    {
+        uint8_t k0;
+        track_select(TRK_DRUM);
+        pc((uint32_t)song.g[G_DRCH] - 1u, 3);
+        check(TDRUM->p[P_E0] == 3, "PC on the drum channel selects kit 3");
+        pc((uint32_t)song.g[G_DRCH] - 1u, DRUM_KITS - 1u);
+        k0 = TDRUM->p[P_E0];
+        check(k0 == DRUM_KITS - 1, "the last kit is reachable");
+        pc((uint32_t)song.g[G_DRCH] - 1u, DRUM_KITS);
+        check(TDRUM->p[P_E0] == k0, "PC past the last kit is ignored");
+        /* the drum channel off: the same channel now plays the selection */
+        song.g[G_DRCH] = 0;
+        track_select(1);
+        pc(9, 0);
+        check(trk[1].eng_req == BANK[0].e, "with G_DRCH off, that channel follows the selection");
+        song.g[G_DRCH] = 10;
+    }
+    /* a PC never touches the pattern, only the sound */
+    {
+        static const uint8_t NOTE48[1] = {48};
+        track_select(0);
+        memset(&trk[0].step, 0, sizeof trk[0].step);
+        put_step(&trk[0], 3, 1, NOTE48, ST_NOTE, 0);   /* a step with a note on it */
+        pc(0, 0);
+        check(trk[0].step[3].n == 1 && trk[0].step[3].note[0] == 48, "PC leaves the pattern alone");
+    }
+    printf("midi PC: %s\n", fails ? "FAILED" : "PASS");
+}
+
 int main(int argc, char **argv)
 {
     uint32_t i;
@@ -128,6 +254,7 @@ int main(int argc, char **argv)
     settings.palette = 4;
     palette_set(4);
     host_tracks_init();
+    midi_pc_tests();
     for (i = 0; i < NPART; i++) { set_engine_of(&trk[i], TRK_DEF[i][0]); apply_preset_to(&trk[i], TRK_DEF[i][1]); trk[i].engine = trk[i].eng_req; }
     TDRUM->p[P_E0] = DRUM_DEFAULT_KIT;
     sloop_splash(); ppm("page-splash");
