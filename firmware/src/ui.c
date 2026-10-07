@@ -12,6 +12,7 @@ static void project_load(uint32_t slot);
 static int project_used(uint32_t slot);
 static int up_used(uint32_t k);              /* user presets: upreset.c */
 static int up_load(uint32_t k);
+static int up_load_to(track_t *t, uint32_t k);
 static uint32_t up_count(void);
 static uint32_t up_nth(uint32_t n);
 static uint32_t up_rank(uint32_t slot);
@@ -428,6 +429,38 @@ static void preset_go(uint32_t n)                    /* load list index n into t
         select_engine(e);
     apply_preset(k);
     ui.force = 1;
+}
+
+/* MIDI program change (seq.c midi_pc): what the PRESETS knob does, addressed by MIDI channel.
+ * A synth part: 0..NBANK-1 the factory presets above, NBANK..NBANK+UP_SLOTS-1 the user slots by
+ * number (an empty one is left alone, as the USER page does). A drum track: 0..DRUM_KITS-1 the
+ * kits. Out of range is ignored, so a sweep of 0..127 does what the knob would and no more. */
+static void midi_pc(track_t *t, uint32_t prog)
+{
+    if (is_drum(t)) {
+        if (prog >= DRUM_KITS)
+            return;
+        t->p[P_E0] = (int16_t)prog;
+        ui.force = 1;
+        sync_reload = 1;
+        return;
+    }
+    if (prog < NBANK) {
+        uint32_t k, e = preset_at(prog, &k);
+        if (e != t->eng_req)
+            set_engine_of(t, e);                    /* the entry may be another engine's */
+        apply_preset_to(t, k);
+    } else if (prog < NBANK + UP_SLOTS) {
+        uint32_t k = prog - NBANK;                   /* the slots are addressed by number, not by rank */
+        if (up_used(k))
+            up_load_to(t, k);
+        else
+            return;
+    } else {
+        return;
+    }
+    ui.force = 1;
+    sync_reload = 1;
 }
 
 /* HOME: what KNOB k edits: the engine's four main parameters; on the drum track

@@ -1713,6 +1713,8 @@ static void seq_reset_tracks(uint32_t pos)
 static void song_backup(void);                     /* project.c: song mode keeps the loop you made */
 static void song_restore(void);
 
+static void midi_pc(track_t *t, uint32_t prog);    /* ui.c: the PRESETS knob, by MIDI channel */
+
 static void seq_start(void)
 {
 #if FELUCCA_ARRANGER
@@ -2218,6 +2220,11 @@ static void events_block(uint32_t n)
         mi_r++;
         if ((pkt & 15u) == 0xFu) {                    /* clock / transport: cable 0 USB, 1 TRS */
             mclk_event((pkt >> 8) & 0xFFu, ((pkt >> 4) & 15u) ? 2u : 1u);
+            continue;
+        }
+        if (st == 0xC0u) {                            /* program change: what the PRESETS knob does */
+            midi_pc(midi_track(ch), d1);               /* midi_track, not midi_route: a PC has no
+                                                        * note, so the note-off tracking has no say */
             continue;
         }
         if (st != 0x90u && st != 0x80u)

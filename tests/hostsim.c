@@ -43,6 +43,12 @@ static void fm1_delay_ms(uint32_t ms) { (void)ms; }
 #if FELUCCA_ARRANGER
 #include "../firmware/src/arranger.c"
 #endif
+/* MIDI program change lives in ui.c (with the preset list), which the DSP-only harnesses here do
+ * not include. Those tests never send one. A harness that does include ui.c (ui_pages_test.c)
+ * defines this away so the real one is linked instead. */
+#ifndef MIDI_PC_IN_UI
+static void midi_pc(track_t *t, uint32_t prog) { (void)t; (void)prog; }
+#endif
 #include "../firmware/src/seq.c"
 #define inst (trk[0])                   /* the single-part renders below: part 1 */
 
