@@ -14,7 +14,7 @@ Free and open source (GPL-3.0), based on <a href="https://github.com/hugelton/Fe
 
 ---
 
-SLOOP turns the FM-1 into a four-track groovebox you play live: **three synths and a drum machine** with 16 sounds on the white keys, nine synthesis engines, 68 sounds, 37 drum kits, your own samples, a song mode you play with your hands — and now **USB audio**, a **MIDI keyboard on the jack**, **MIDI clock**, **lights for playing in the dark** and a **full backup**. House, techno, hip-hop, trap, drum & bass, amapiano, synthwave, lo-fi, ambient, chiptune — it does not pick a style for you. No factory patterns, nothing to load: everything you hear, you play.
+SLOOP turns the FM-1 into a four-track groovebox you play live: **three synths and a drum machine** with 16 sounds on the white keys, nine synthesis engines, 68 sounds, 38 drum kits, your own samples, a song mode you play with your hands — and now **USB audio**, a **MIDI keyboard on the jack**, **MIDI clock**, **lights for playing in the dark** and a **full backup**. House, techno, hip-hop, trap, drum & bass, amapiano, synthwave, lo-fi, ambient, chiptune — it does not pick a style for you. No factory patterns, nothing to load: everything you hear, you play.
 
 > **Status:** 2.3. Still a beta: install at your own risk, and please [report](../../issues) what you find. Your projects, presets, samples and settings are kept when you update, and you can go back at any time (see [Going back](#going-back)).
 
@@ -96,7 +96,7 @@ Keys 1, 5, 9 and 13 glow dimly while a layer is held: the first key of each row 
 
 - **16 sounds on the white keys**, kick to cowbell; a black key doubles the white key on its left (fast rolls with two fingers).
 - **Ghost and hard hits:** hold OCT− / OCT+ while you play. Every hit keeps its level (GHOST, SOFT, NORM, HARD) and a **ratchet** (x1–x4).
-- **37 kits**, all level-matched: a sampled acoustic kit in 5 treatments (CC0 studio recordings) and 32 synthesised kits — 808, 909, 606, 80s, vintage, trap, drill, boom bap, lo-fi, phonk, house, deep house, techno, minimal, electro, disco, UK garage, jungle, dubstep, reggaeton, amapiano, afrobeat, latin, tribal, synthwave, chiptune, arcade, glitch, industrial, hyperpop, ambient, jazz brushes. Each synthesised sound is built like on the classic machines; softer hits are darker as well as quieter.
+- **38 kits**, all level-matched: a sampled acoustic kit in 5 treatments (CC0 studio recordings), 32 synthesised kits — 808, 909, 606, 80s, vintage, trap, drill, boom bap, lo-fi, phonk, house, deep house, techno, minimal, electro, disco, UK garage, jungle, dubstep, reggaeton, amapiano, afrobeat, latin, tribal, synthwave, chiptune, arcade, glitch, industrial, hyperpop, ambient, jazz brushes — and `USER KIT`, your own: the 16 sounds you upload to `USR1` from the Web Editor play on the 16 white keys, with the drum engine's levels, ratchets and ducking. Each synthesised sound is built like on the classic machines; softer hits are darker as well as quieter.
 - **Grid and kit pages** on the FM-1 (EDIT or SEQ on the drum track), and a 16-lane grid in the web editor.
 
 ### Synths and sounds
@@ -310,7 +310,7 @@ Something else? [Open an issue](../../issues): what you did, what you expected, 
 | --- | --- |
 | Tracks | 3 synth parts (8 voices shared) + drums (16 sounds, 6 voices) |
 | Sounds | 68 presets on 9 engines (browsed by kind, level-matched), 8 sampled sets (CC0), 3 slots for your own samples, 32 user presets |
-| Drum kits | 37 (5 sampled, 32 synthesised, 16 sounds each), level-matched |
+| Drum kits | 38 (5 sampled, 32 synthesised, 1 yours from USR1; 16 sounds each), level-matched |
 | Sequencer | 64 steps per track, own length and division each; chords with a level and ratchet per note; drums with a level and ratchet per sound; ties, slide; MPC swing 50–75 %; one sample-accurate clock (no drift) |
 | Recording | live, quantised as heard (latency-compensated), overdub; free take (the tempo follows you) or the tempo set; start on the first note or a one-bar count-in; 1, 2 or 4 bars |
 | Performance | layers: punch-in FX, erase, note repeat, step entry, key / chords, mute / solo / tap tempo, song sections |

@@ -314,7 +314,7 @@ static void drum_screen_draw(void)
     bank = drum_cursor / 16u;
     {
         char st[16];
-        te_lower(st, DRUM_KIT_STYLES[kit], sizeof st);
+        te_lower(st, drum_kit_style(kit), sizeof st);
         st[12] = 0;
         te_header(st, TE_DRUM, &head);
     }

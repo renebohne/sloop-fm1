@@ -9,12 +9,21 @@
 #define NDRUM 6
 #include "drum_synth.c"       /* synthesised kits (DS_KITS) */
 /* P_E0 was unused on the drum track: it holds the kit. 0..4: the GM sample kit and its four
- * treatments (as before: old projects keep their kit), 5..: the synthesised kits. */
+ * treatments (as before: old projects keep their kit), 5..: the synthesised kits, last: the user
+ * kit (the samples uploaded to USR1, falling back to the built-in one until they are). */
 #define DRUM_SAMPLED 5u
-#define DRUM_KITS (DRUM_SAMPLED + DS_NKITS)
-static const char *const DRUM_KIT_NAMES[] = {"ACOUSTIC", "DEEP", "TIGHT", "BRIGHT", "DUST", DS_KIT_NAME_LIST};
-static const char *const DRUM_KIT_STYLES[] = {"STUDIO", "SOFT", "PUNCHY", "BRIGHT", "DUSTY", DS_KIT_STYLE_LIST};
+#define DRUM_USER_KITS 1u
+#define DRUM_KITS (DRUM_SAMPLED + DS_NKITS + DRUM_USER_KITS)
+#define DRUM_USER_KIT (DRUM_SAMPLED + DS_NKITS)
+static const char *const DRUM_KIT_NAMES[] = {"ACOUSTIC", "DEEP", "TIGHT", "BRIGHT", "DUST", DS_KIT_NAME_LIST, "USER KIT"};
+static const char *const DRUM_KIT_STYLES[] = {"STUDIO", "SOFT", "PUNCHY", "BRIGHT", "DUSTY", DS_KIT_STYLE_LIST, "CUSTOM"};
 static uint32_t drum_kit(void) { return (uint32_t)clamp(TDRUM->p[P_E0], 0, DRUM_KITS - 1); }
+/* the kit's style, for the drum page header: the user kit says EMPTY until USR1 holds samples,
+ * so an unconfigured kit is visible on the device and not only in the Web Editor */
+static const char *drum_kit_style(uint32_t kit)
+{
+    return kit == DRUM_USER_KIT && !usr_nz[0] ? "EMPTY" : DRUM_KIT_STYLES[kit];
+}
 #define DRUM_DEFAULT_KIT DRUM_SAMPLED   /* power-on: 808 */
 
 static struct {
@@ -50,8 +59,8 @@ static int32_t drum_set(void)
 /* The drum track's 16 sounds, one per white key, F3 (kick) .. G5 (cowbell): kicks, snare and clap,
  * the hi-hats, rim and a second snare, the toms, the cymbals, the percussion. Each plays a GM note
  * (the sampled kits: their samples; the synthesised kits: drum_synth.c DS_MAP). A black key plays
- * the lane of the white key left of it (two fingers on one sound). */
-static const uint8_t LANE_NOTE[DRUM_LANES] = {36, 35, 38, 39, 42, 46, 44, 37, 40, 43, 48, 49, 51, 70, 63, 56};
+ * the lane of the white key left of it (two fingers on one sound). The lane -> GM note table is
+ * LANE_NOTE (core.h, with DRUM_LANES). */
 static const char *const LANE_NAME[DRUM_LANES] = {
     "KICK", "KICK 2", "SNARE", "CLAP", "HAT", "OPEN HAT", "PEDAL", "RIM",
     "SNARE 2", "LOW TOM", "HI TOM", "CRASH", "RIDE", "SHAKER", "CONGA", "COWBELL"};
@@ -123,11 +132,12 @@ static void drum_on(uint32_t note, uint32_t vel)
     const smp_set_t *set;
     voice_t *v = &drums.v[0];
     uint32_t i, zi = 0xFFFFu, kit = drum_kit();
+    int usr = 0;                                      /* the voice plays a sample from USR1 */
     if (note != 76u && note != 77u)                 /* the pads and key LEDs (not the click's wood block) */
         drums.hits |= (uint16_t)(1u << lane_of_note(note));
     if (note == 35u || note == 36u)
         drums.kick = 1;                             /* (DUCK) */
-    if (kit >= DRUM_SAMPLED) {                      /* synthesised kit */
+    if (kit >= DRUM_SAMPLED && kit < DRUM_USER_KIT) { /* synthesised kit */
         if (note == 42u || note == 44u)             /* hi-hat choke */
             for (i = 0; i < NDRUM; i++)
                 if (drums.v[i].active && drums.v[i].note == 46u) {
@@ -155,14 +165,27 @@ static void drum_on(uint32_t note, uint32_t vel)
         ds_on(&drums.ds[i], &DS_KITS[kit - DRUM_SAMPLED], note, vel);
         return;
     }
-    if (si < 0)
-        return;
-    set = &SMP_SETS[si];
-    for (i = 0; i < set->nz; i++)
-        if (note >= SMP_ZONES[set->z0 + i].lo && note <= SMP_ZONES[set->z0 + i].hi)
-            zi = set->z0 + i;
-    if (zi == 0xFFFFu)
-        return;
+    if (kit == DRUM_USER_KIT) {
+        /* The user kit plays the samples uploaded to USR1. Until they are (a fresh install), and for
+         * a note outside their zone map, it falls back to the built-in GM kit rather than going
+         * silent, so the kit is never a dead row in the list. */
+        for (i = 0; i < usr_nz[0]; i++)
+            if (note >= usr_zone[0][i].lo && note <= usr_zone[0][i].hi) {
+                zi = 0x8000u | 0u << 5 | i;
+                usr = 1;
+                break;
+            }
+    }
+    if (zi == 0xFFFFu) {                          /* a sampled kit, or the user kit's fallback */
+        if (si < 0)
+            return;
+        set = &SMP_SETS[si];
+        for (i = 0; i < set->nz; i++)
+            if (note >= SMP_ZONES[set->z0 + i].lo && note <= SMP_ZONES[set->z0 + i].hi)
+                zi = set->z0 + i;
+        if (zi == 0xFFFFu)
+            return;
+    }
     if (note == 42u || note == 44u)                 /* hi-hat choke */
         for (i = 0; i < NDRUM; i++)
             if (drums.v[i].active && drums.v[i].note == 46u) {
@@ -187,16 +210,22 @@ static void drum_on(uint32_t note, uint32_t vel)
     v->s[4] = (int32_t)zi;
     v->ph[0] = v->ph[1] = 0;
     v->s[0] = v->s[1] = v->s[2] = 0;
-    v->s[3] = sample_next(&SMP_ZONES[zi], v, 0);
-    v->s[5] = (int32_t)((pow2_q16((int32_t)note * 16 - SMP_ZONES[zi].root16) >> 8) * (SMP_ZONES[zi].rate >> 8));
     {
-        uint32_t vi = (uint32_t)(v - drums.v);
-        int32_t shift = kit == 1u ? (note <= 36u ? -5 : -2) : kit == 3u ? 2 : kit == 4u ? -1 : 0;
-        drums.kit[vi] = (uint8_t)kit;
-        drums.synth[vi] = 0;
-        drums.filter[vi] = 0;
-        drums.env[vi] = 32767;
-        if (shift) v->s[5] = (int32_t)((pow2_q16((int32_t)note * 16 + shift * 16 - SMP_ZONES[zi].root16) >> 8) * (SMP_ZONES[zi].rate >> 8));
+        const smp_zone_t *z = smp_zone((uint32_t)zi);
+        v->s[3] = sample_next(z, v, 0);
+        v->s[5] = (int32_t)((pow2_q16((int32_t)note * 16 - z->root16) >> 8) * (z->rate >> 8));
+        {
+            uint32_t vi = (uint32_t)(v - drums.v);
+            /* the user kit's own samples play as written; only its fallback (the built-in GM kit,
+             * so the row is never a dead one) takes the -3 that keeps it off ACOUSTIC's sound */
+            int32_t shift = kit == 1u ? (note <= 36u ? -5 : -2) : kit == 3u ? 2 : kit == 4u ? -1
+                         : kit == DRUM_USER_KIT && !usr ? -3 : 0;
+            drums.kit[vi] = (uint8_t)kit;
+            drums.synth[vi] = 0;
+            drums.filter[vi] = 0;
+            drums.env[vi] = 32767;
+            if (shift) v->s[5] = (int32_t)((pow2_q16((int32_t)note * 16 + shift * 16 - z->root16) >> 8) * (z->rate >> 8));
+        }
     }
 }
 
@@ -244,9 +273,10 @@ static inline void drums_mix(int32_t *ml, int32_t *mr, int32_t *rev, int32_t *mo
     }
     for (k = 0; k < NDRUM; k++) {
         voice_t *v = &drums.v[k];
-        const smp_zone_t *z = &SMP_ZONES[v->s[4]];
+        const smp_zone_t *z;
         if (drums.synth[k])
             continue;
+        z = smp_zone((uint32_t)v->s[4]);
         uint32_t frac = v->ph[1], stepq = (uint32_t)v->s[5];   /* Q16 source samples per output (drum_on) */
         int32_t g;
         if (!v->active)

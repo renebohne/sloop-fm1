@@ -525,8 +525,9 @@ async function editorV5() {
   ok(E.DRUM_LANES.length === 16 && E.DRUM_LANES[0][0] === 36 && E.DRUM_LANES[15][0] === 56 && E.LV_NAMES.join() === "NORM,GHOST,SOFT,HARD",
     "v5: the 16 lanes (kick .. cowbell), 4 levels");
   const dc = readFileSync(join(HERE, "../firmware/src/drums.c"), "utf8");
-  const lanes = ((/LANE_NOTE\[DRUM_LANES\] = \{([^}]*)\}/.exec(dc) || [])[1] || "").split(",").map((x) => +x);
-  ok(lanes.join() === E.DRUM_LANES.map((x) => x[0]).join(), "v5: lane notes == drums.c LANE_NOTE");
+  const ch = readFileSync(join(HERE, "../firmware/src/core.h"), "utf8");
+  const lanes = ((/LANE_NOTE\[DRUM_LANES\] = \{([^}]*)\}/.exec(ch) || [])[1] || "").split(",").map((x) => +x);
+  ok(lanes.join() === E.DRUM_LANES.map((x) => x[0]).join(), "v5: lane notes == core.h LANE_NOTE");
   /* the kit: the drum track's P_E0 */
   await rq(E.req.track(3));
   const kit = E.parse[C.DESC](await rq(E.req.desc(0, info.pe0)));

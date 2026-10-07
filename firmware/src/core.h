@@ -156,6 +156,10 @@ typedef struct {                 /* a step of a synth part (10 bytes): up to 4 n
     uint8_t rat;                 /* 2 bits per note: the hits it plays in its step - 1 (ratchet x1..x4) */
 } step_t;
 #define DRUM_LANES 16            /* the drum track: 16 sounds, one per white key (drums.c LANE_*) */
+/* lane -> the GM note it plays (drums.c): index = lane, value = note. The lane order is the
+ * contract between the keys, the step page, the pads and the GM map, so it lives here with
+ * DRUM_LANES and not in the drum engine. F3 (kick) .. G5 (cowbell), on the white keys. */
+static const uint8_t LANE_NOTE[DRUM_LANES] = {36, 35, 38, 39, 42, 46, 44, 37, 40, 43, 48, 49, 51, 70, 63, 56};
 typedef struct {                 /* a step of the drum track (10 bytes, the size of a step_t) */
     uint8_t on[2];               /* bit per lane */
     uint8_t lvl[4];              /* 2 bits per lane (lane k: byte k / 4, bits 2 (k % 4)..): LV_* */

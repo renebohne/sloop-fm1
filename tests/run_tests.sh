@@ -47,6 +47,10 @@ run "sequencer 2.0: no drift, ratchets, roll, erase / undo, ghost / hard, chords
 
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/drumkit_test" tests/drumkit_test.c -lm
 run "synthesised drum kits: every kit x sound bounded, audible, finite, levels, cost" "$OUT/drumkit_test" "$OUT/drum-kits.wav" "$OUT/drum-kits.txt"
+
+$CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/user_drum_kit_test" tests/user_drum_kit_test.c -lm
+run "user drum kit: USR1 on the 16 keys, the built-in kit until then, USR2/3 untouched" \
+    "$OUT/user_drum_kit_test" "$OUT/user-drum-kit.wav"
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/punch_test" tests/punch_test.c -lm
 run "punch-in FX: 16 effects, bounded, dry after release, FX-held keys" "$OUT/punch_test" "$OUT/punch-fx.wav"
 
