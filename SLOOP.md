@@ -10,7 +10,7 @@ SLOOP is free and open source (GPL-3.0), based on [Felucca](https://github.com/h
 
 ### New in 2.3
 
-- **A MIDI keyboard on the MIDI IN jack.** The FM-1's 3.5 mm TRS MIDI input works: channels 1–3 play the synth tracks, 10 the drums, 4–16 the selected track. The input reads its buffer by content, so no note is left hanging (fix from Felucca [Salt], by ChanceTheMaker and keremimo). See [MIDI keyboards](#midi-keyboards).
+- **A MIDI keyboard on the MIDI IN jack.** The FM-1's 3.5 mm TRS MIDI input works: channels 1–3 play the synth tracks, 10 the drums, 4–16 the selected track. The input reads its buffer by content, so no note is left hanging (fix from Felucca [Salt], by ChanceTheMaker and keremimo). A program change from the controller picks a preset or a kit, and 45 control changes reach the knobs, so the sound can be played from a controller's faders without touching the FM-1. See [MIDI keyboards](#midi-keyboards).
 - **MIDI clock in.** GLO → SYSTEM → **SYNC**: USB or TRS, a setting of the FM-1 that stays when you load a project. SLOOP follows the master's tempo, START, CONTINUE and STOP, pulse by pulse, so it never drifts (after Felucca 1.0, from contributions by ChanceTheMaker and keremimo). See [MIDI keyboards](#midi-keyboards).
 - **USB audio: record the FM-1 on a computer.** On USB the FM-1 is also an audio input (*Felucca*, 44.1 kHz stereo, no driver): record its master output in your DAW or Audacity, MIDI and the editor still working on the same cable (after Felucca 1.0). HOME menu → **USB AUDIO**: the level follows the MASTER knob, or **FULL**, a fixed full level. See [USB audio](#usb-audio-record-on-a-computer).
 - **Choose how REC records.** On the REC screen: KNOB 1 **mode** — *free* (the free take: the tempo follows you) or *tempo* (record at the tempo you set) — KNOB 2 the **length** (1, 2 or 4 bars), KNOB 3 the **start** — your first note, or a one-bar **count-in** after PLAY. See [Recording](#recording).
@@ -361,6 +361,28 @@ SLOOP takes MIDI from two places at once:
 
 **MIDI clock in:** GLO → SYSTEM → **SYNC** = **USB** or **TRS** (INT: SLOOP's own tempo). START plays from the top, CONTINUE carries on where it stopped, STOP stops; the tempo (BPM) follows the master, and the steps follow its 24 pulses a beat, so SLOOP cannot drift away from it. When the clock stops for half a second, PLAY on the FM-1 plays at its own tempo again. SYNC is a setting of the FM-1: it stays when you load a project.
 
+**Program change:** a PC on a track's channel loads that track's preset, and on the drum channel a drum kit (0 is the first of each). It is what the PRESETS knob does, from your controller.
+
+**Control change (CC):** an external controller's knobs reach the parameters. The MIDI channel picks the track, the same way notes do, so your controller's channel decides which part it moves; the CC number picks the parameter, and it is the same number whatever page the FM-1 happens to be showing.
+
+| CC | Moves | CC | Moves |
+| --- | --- | --- | --- |
+| 7 | LEVEL | 10 | PAN |
+| 16 / 17 | HOME knob 1 / 2 | 18 / 19 | HOME knob 3 / 4 |
+| 20 / 21 | ATK / DEC | 22 / 23 | SUS / REL |
+| 24 / 25 | ENV DEST FLT / PIT | 26 | ENV DEST SHP |
+| 27 / 28 | LFO RATE / WAVE | 29 / 30 | LFO PHS / FADE |
+| 31 / 32 | LFO DEST PIT / FLT | 33 / 34 | LFO DEST SHP / AMP |
+| 35 / 36 | DIST / CHOR | 37 / 38 | DLY / REV |
+| 39 / 40 | SLICER SLCR / SLPAT | 41 / 42 | SLICER RATE / DEPTH |
+| 43–50 | EDIT 1 and EDIT 2: the engine's own knobs 1–8 | | |
+| 51 / 52 | VOICE / GLIDE | 53 / 54 | GLIDE MODE / PRIO |
+| 55 / 56 | ALLOC / DETUNE | 57 / 58 | PAN / MUTE |
+
+The four HOME knobs are the engine's own (on POLY, its LEV, ALG, RATIO and FEED, say), so CC 16–19 always move the four that the HOME page of that engine shows. On the drum channel they are the drum's LEVEL, REVERB, PAN and SLICE LEN, and only CC 7, 10, 16–19 and 39–42 do anything there.
+
+A CC value is absolute over the parameter's own range: 0 is its minimum, 127 its maximum, and a parameter with a fixed list of positions lands on one of them. A controller that sends 14-bit values in two CCs (pitch bend style) moves nothing; it has to send plain 7-bit ones.
+
 Bluetooth MIDI is not supported: SLOOP, like Felucca, never switches the radio on.
 
 ## USB audio: record on a computer
@@ -400,7 +422,7 @@ The glow is a short pulse on every scan of the panel (about 900 times a second):
 | Recording | live, quantised as heard (latency-compensated), overdub; records at once while playing; free take sets loop length and tempo, or the tempo set, from the first note or a one-bar count-in |
 | Memory | undo / redo, 4 projects, 32 user presets, autosave of the working project, song of 4 sections × 16 steps × 1–64 bars |
 | Audio | 44.1 kHz, fixed-point DSP; USB audio input (the master output, 16-bit stereo, class compliant) |
-| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm jack); channels 1–3 the synths, 10 the drums, 4–16 the selected track; MIDI clock in (USB or TRS) |
+| MIDI | USB class-compliant in / out; TRS MIDI IN (3.5 mm jack); channels 1–3 the synths, 10 the drums, 4–16 the selected track; program change selects a preset or kit; 45 control changes for the knobs (see [MIDI keyboards](#midi-keyboards)); MIDI clock in (USB or TRS) |
 | Update | over USB from the browser (package SHA-256 and CRC checked) |
 
 ## Rescue, going back, credits

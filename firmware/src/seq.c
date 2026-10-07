@@ -1263,6 +1263,7 @@ static void song_backup(void);                     /* project.c: song mode keeps
 static void song_restore(void);
 
 static void midi_pc(track_t *t, uint32_t prog);    /* ui.c: the PRESETS knob, by MIDI channel */
+static void cc_change(track_t *t, uint32_t cc, uint32_t val);   /* ccmap.c: a controller's knob */
 
 static void seq_start(void)
 {
@@ -1677,6 +1678,10 @@ static void events_block(uint32_t n)
         if (st == 0xC0u) {                            /* program change: what the PRESETS knob does */
             midi_pc(midi_track(ch), d1);               /* midi_track, not midi_route: a PC has no
                                                         * note, so the note-off tracking has no say */
+            continue;
+        }
+        if (st == 0xB0u) {                            /* control change: a controller's knobs */
+            cc_change(midi_track(ch), d1, d2);
             continue;
         }
         if (st != 0x90u && st != 0x80u)

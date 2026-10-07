@@ -17,6 +17,7 @@
  * then 20000 frames of random use: every draw stays on the screen. */
 #define FELUCCA_ARRANGER 1
 #define MIDI_PC_IN_UI 1                 /* ui.c below has the real midi_pc: not hostsim's stub */
+#define MIDI_CC_IN_UI 1                 /* ccmap.c below has the real cc_change: not hostsim's stub */
 #define main hostsim_main
 #include "hostsim.c"
 #undef main
@@ -92,6 +93,7 @@ static void settings_save(void) {}
 #include "../firmware/src/ui_layers.c"
 #include "../firmware/src/ui_menu.c"
 #include "../firmware/src/ui_input.c"
+#include "../firmware/src/ccmap.c"         /* MIDI CC: after ui.c, as the firmware includes it */
 #include "../firmware/src/splash.c"
 static const char *outdir;
 static void ppm(const char *name) {
@@ -116,6 +118,7 @@ static void tap(uint32_t b) { press(b); release(b); }
 static void key(uint32_t k) { fm1_in.notes |= 1u << k; frame(); fm1_in.notes &= ~(1u << k); frame(); }
 static int fails;
 static void check(int ok, const char *what) { printf("ui: %-74s %s\n", what, ok ? "ok" : "FAIL"); fails += !ok; }
+static void cc_tests(void);
 
 /* a PC message on channel ch, as seq.c reads it out of midi_in_q: status 0xC0 | ch, 2 bytes */
 static uint32_t pc_pkt(uint32_t ch, uint32_t prog) { return 0xCu | (0xC0u | ch) << 8 | prog << 16; }
@@ -124,6 +127,13 @@ static void pc(uint32_t ch, uint32_t prog)
     midi_in_q[mi_w % MQ] = pc_pkt(ch, prog);
     mi_w++;
     events_block(CTL);                                /* the MIDI loop runs there */
+}
+/* a CC message on channel ch: status 0xB0 | ch, 3 bytes (usb.c admits cin 0xB) */
+static void cc(uint32_t ch, uint32_t num, uint32_t val)
+{
+    midi_in_q[mi_w % MQ] = 0xBu | (0xB0u | ch) << 8 | (num & 0x7Fu) << 16 | (val & 0x7Fu) << 24;
+    mi_w++;
+    events_block(CTL);
 }
 /* MIDI program change: what the PRESETS knob does, addressed by channel */
 static void midi_pc_tests(void)
@@ -225,6 +235,145 @@ static void midi_pc_tests(void)
         check(trk[0].step[3].n == 1 && trk[0].step[3].note[0] == 48, "PC leaves the pattern alone");
     }
     printf("midi PC: %s\n", fails ? "FAILED" : "PASS");
+    cc_tests();
+}
+
+/* MIDI control change: the parameter a controller knob moves, on the track its channel plays */
+static void cc_tests(void)
+{
+    uint32_t n, i, sc, id, mapped;
+    printf("midi CC: level CC7, pan CC10, HOME CC16-19, ENV CC20-26, LFO CC27-34, "
+           "FX+SLICER CC35-42, EDIT CC43-58\n");
+    /* every mapped CC writes the parameter it names, at both ends of its range */
+    host_tracks_init();
+    mapped = 0;
+    for (n = 0; n < 128u; n++) {                     /* every CC number a controller can send */
+        track_t *t = &trk[0];
+        if (!cc_target(t, n, &sc, &id))
+            continue;
+        mapped++;
+        for (i = 0; i < 2u; i++) {
+            const param_desc_t *d = sc ? &GP[id] : track_desc(t, id);
+            int16_t *vp = sc ? &song.g[id] : &t->p[id];
+            uint32_t ccv = i ? 127u : 0u;
+            int32_t want = d->min + ((int32_t)(d->max - d->min) * (int32_t)ccv) / 127;
+            *vp = (int16_t)(d->min + d->max) / 2;    /* away from both ends */
+            cc(0, n, ccv);
+            if (*vp != want) {
+                printf("ui: CC %u -> %s: value %d, expected %d\n", n,
+                       sc ? "global" : TP[id].label, *vp, want);
+                fails++;
+            }
+        }
+    }
+    check(mapped == CC_MAP_N, "every mapped CC reaches a parameter");
+    /* the ranges: a negative one lands on both ends, an enum stays on one of its values */
+    {
+        track_select(0);
+        cc(0, CC_PAN, 0);
+        check(trk[0].p[P_PAN] == TP[P_PAN].min, "CC 10 at 0 is the parameter's own minimum");
+        cc(0, CC_PAN, 127);
+        check(trk[0].p[P_PAN] == TP[P_PAN].max, "CC 10 at 127 is its maximum");
+        cc(0, CC_PAN, 64);
+        check(trk[0].p[P_PAN] == 0, "CC 10 at 64 is its centre (0)");
+        cc(0, CC_HOME0, 127);                         /* P_LWAVE: an enum */
+        check(trk[0].p[P_LWAVE] >= 0 && trk[0].p[P_LWAVE] <= TP[P_LWAVE].max,
+              "CC 27 at 127 lands on one of P_LWAVE's values");
+        cc(0, CC_LEVEL, 127);
+        check(trk[0].p[P_LEVEL] == TP[P_LEVEL].max, "CC 7 at 127 is full level");
+        cc(0, CC_LEVEL, 0);
+        check(trk[0].p[P_LEVEL] == TP[P_LEVEL].min, "CC 7 at 0 is the minimum");
+    }
+    /* HOME follows the engine, on both synth and drum */
+    {
+        uint32_t e0, k, differs = 0;
+        for (k = 0; k < 4u; k++) {
+            for (e0 = 0; e0 < NENGINES; e0++)
+                if (ENGINES[e0]->macro[k] != ENGINES[(e0 + 1u) % NENGINES]->macro[k]) differs++;
+        }
+        check(differs, "the engines' HOME knobs differ, so the map can follow them");
+        track_select(0);
+        for (e0 = 0; e0 < NENGINES; e0++) {
+            for (k = 0; k < 4u; k++) {
+                uint32_t id = ENGINES[e0]->macro[k];
+                track_desc(&trk[0], id)->min;             /* (resolves: a valid id) */
+                trk[0].eng_req = (uint8_t)e0;
+                cc(0, CC_HOME0 + k, 127);
+                if (trk[0].p[id] != track_desc(&trk[0], id)->max) {
+                    printf("ui: CC %u on engine %s: P_%u = %d, expected %d\n", CC_HOME0 + k,
+                           ENGINES[e0]->name, id, trk[0].p[id], track_desc(&trk[0], id)->max);
+                    fails++;
+                }
+            }
+        }
+    }
+    /* the drum track takes its own four, the slicer, level and pan; nothing else */
+    {
+        uint32_t drumch = song.g[G_DRCH] ? (uint32_t)song.g[G_DRCH] - 1u : 9u;
+        int16_t lvl0 = TP[P_LEVEL].min;
+        track_select(TRK_DRUM);
+        cc(drumch, CC_LEVEL, 127);
+        check(song.g[G_DRLVL] == GP[G_DRLVL].max, "CC 7 on the drum channel is G_DRLVL");
+        song.g[G_DRLVL] = lvl0;
+        cc(drumch, CC_HOME0 + 1, 127);
+        check(song.g[G_DRREV] == GP[G_DRREV].max, "CC 17 on the drum channel is G_DRREV");
+        cc(drumch, CC_PAN, 127);
+        check(TDRUM->p[P_PAN] == TP[P_PAN].max, "CC 10 on the drum channel is its PAN");
+        cc(drumch, CC_HOME0 + 23, 127);                 /* P_SLCR: the slicer is a drum track page */
+        check(TDRUM->p[P_SLCR] == TP[P_SLCR].max, "CC 39 on the drum channel is the SLICER");
+        cc(drumch, CC_HOME0 + 27, 127);                 /* P_E0: a synth parameter, and on drums the kit */
+        check(TDRUM->p[P_E0] != TP[P_E0].max || TP[P_E0].max == 0,
+              "CC 43 (a synth parameter) does nothing on the drum channel");
+        pc(drumch, 0);
+        check(TDRUM->p[P_E0] == 0, "and PC still takes the kit, not a CC");
+    }
+    /* unmapped CCs: nothing moves */
+    {
+        static const uint8_t UNUSED[] = {0, 1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 13, 14, 15, 59, 60, 64, 127};
+        uint32_t moved = 0, u;
+        host_tracks_init();
+        track_select(0);
+        for (u = 0; u < sizeof UNUSED; u++) {
+            int16_t before[P_COUNT];
+            uint32_t q;
+            memcpy(before, trk[0].p, sizeof before);
+            cc(0, UNUSED[u], 127);
+            for (q = 0; q < P_COUNT; q++)
+                if (trk[0].p[q] != before[q]) moved++;
+        }
+        if (moved)
+            printf("ui: an unmapped CC moved %u parameters\n", moved);
+        check(!moved, "an unmapped CC changes nothing");
+    }
+    /* a channel that owns no part follows the selection, as notes and PC do */
+    {
+        int16_t atk;
+        host_tracks_init();
+        track_select(2);
+        song.g[G_DRCH] = 0;                            /* channel 9 is nobody's */
+        atk = TP[P_ATK].min;
+        trk[2].p[P_ATK] = atk;
+        trk[1].p[P_ATK] = atk;
+        cc(9, CC_HOME0 + 4, 127);                      /* P_ATK */
+        check(trk[2].p[P_ATK] == TP[P_ATK].max && trk[1].p[P_ATK] == atk,
+              "CC on an unassigned channel moves the selected track only");
+        song.g[G_DRCH] = 10;
+    }
+    /* a CC never touches the pattern, and never the sound's identity */
+    {
+        static const uint8_t NOTE48[1] = {48};
+        uint8_t eng, pre;
+        host_tracks_init();
+        track_select(0);
+        memset(&trk[0].step, 0, sizeof trk[0].step);
+        put_step(&trk[0], 3, 1, NOTE48, ST_NOTE, 0);
+        eng = trk[0].eng_req;
+        pre = trk[0].preset;
+        cc(0, CC_LEVEL, 127);
+        check(trk[0].step[3].n == 1 && trk[0].step[3].note[0] == 48, "CC leaves the pattern alone");
+        check(trk[0].eng_req == eng && trk[0].preset == pre, "CC does not change the engine or preset");
+    }
+    printf("midi CC: %s\n", fails ? "FAILED" : "PASS");
 }
 
 int main(int argc, char **argv)

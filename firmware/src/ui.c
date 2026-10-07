@@ -434,11 +434,10 @@ static void midi_pc(track_t *t, uint32_t prog)
  * LEVEL and REV (GLO > DRUMS), PAN and LEN */
 static const param_desc_t *home_param(uint32_t k, int16_t **vp)
 {
-    static const uint8_t DRUM_HOME[4][2] = {{1, G_DRLVL}, {1, G_DRREV}, {0, P_PAN}, {0, P_SLEN}};
     uint32_t id;
     if (is_drum(TSEL)) {
-        id = DRUM_HOME[k & 3u][1];
-        if (DRUM_HOME[k & 3u][0]) {
+        id = CC_DRUM_HOME[k & 3u][1];             /* ccmap.c: the drum track's HOME knobs, as CC too */
+        if (CC_DRUM_HOME[k & 3u][0]) {
             *vp = &song.g[id];
             return &GP[id];
         }
